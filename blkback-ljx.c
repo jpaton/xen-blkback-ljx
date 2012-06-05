@@ -570,13 +570,18 @@ static bool parse_ext3_superblock(struct bio *bio, char *data) {
 
 	if (!data)
 		return false;
-	//ext3_sb = (struct ext3_super_block *)(data + bvl->bv_offset);
-	ljx_ext3_fill_super(superblock, data, 0);
+	ext3_sb = (struct ext3_super_block *)(data + bvl->bv_offset);
+	ljx_ext3_fill_super(superblock, ext3_sb, 0);
 	//printk(KERN_INFO "\tinodes_count: %d", (int) *superblock->inodes_count);
 	//printk(KERN_INFO "\tblocks_count: %d", (int) lsb->blocks_count);
 	//printk(KERN_INFO "\tinode_size: %d", (int) lsb->inode_size);
 
 	return true;
+}
+
+static int parse_boot_block(struct bio *bio, char *data) {
+	/* TODO */
+	return 0;
 }
 
 /*
@@ -586,7 +591,7 @@ static void reflect_on_bio(struct bio *bio) {
 	struct bio_vec *bvl = bio_iovec_idx(bio, 0);
 	struct pending_req *preq = bio->bi_private;
 	unsigned int sectors = bio_sectors(bio);
-	char *data;
+	char buf[1024];
 
 	printk(KERN_INFO "bio:");
 	if (!bvl)
@@ -604,9 +609,11 @@ static void reflect_on_bio(struct bio *bio) {
 		printk(KERN_INFO "\tblock device: %d", (int) preq->blkif->vbd.handle);
 
 		/* try to parse the block */
-		data = kmap_atomic(bvl->bv_page);
-		parse_ext3_superblock(bio, data);
-		kunmap_atomic(data);
+		if (!preq->blkif->vbd.superblock && valid_ext3_superblock(bio, buf)) 
+			parse_ext3_superblock(bio, buf);
+		else if (valid_boot_block(bio, buf)) 
+			parse_boot_block(bio, buf);
+		/* soon there will be more tests here */
 	}
 }
 

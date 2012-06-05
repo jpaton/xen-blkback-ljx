@@ -9,15 +9,13 @@
 #include <linux/capability.h>
 #include <linux/ext3_fs.h>
 
+#include "ext3.h"
+#include "boot.h"
+
 #define procfs_name "blkback-ljx"
 
 extern struct proc_dir_entry *proc_file;
 
 extern void ljx_init(void);
-
-/**
- * Based on fs/ext3/super.c:1630. Can't use bread, however
- */
-extern int ljx_ext3_fill_super(void **, void *, int);
 
 #endif
