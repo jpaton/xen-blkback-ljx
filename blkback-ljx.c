@@ -588,13 +588,12 @@ static int parse_boot_block(struct bio *bio, char *data) {
  * reflect on the bio, printk-ing some stuff about it
  */
 static void reflect_on_bio(struct bio *bio) {
-	struct bio_vec *bvl = bio_iovec_idx(bio, 0);
 	struct pending_req *preq = bio->bi_private;
 	unsigned int sectors = bio_sectors(bio);
-	char buf[1024];
+	char *buf;
 
 	printk(KERN_INFO "bio:");
-	if (!bvl)
+	if (! bio->bi_io_vec)
 		printk(KERN_INFO "\tbio_vec null");
 	else {
 		if (bio->bi_rw & REQ_WRITE)
@@ -609,10 +608,14 @@ static void reflect_on_bio(struct bio *bio) {
 		printk(KERN_INFO "\tblock device: %d", (int) preq->blkif->vbd.handle);
 
 		/* try to parse the block */
+		buf = kzalloc(sizeof(char) * 1024, GFP_KERNEL);
 		if (!preq->blkif->vbd.superblock && valid_ext3_superblock(bio, buf)) 
 			parse_ext3_superblock(bio, buf);
+		/*
 		else if (valid_boot_block(bio, buf)) 
 			parse_boot_block(bio, buf);
+		*/
+		kfree(buf);
 		/* soon there will be more tests here */
 	}
 }
