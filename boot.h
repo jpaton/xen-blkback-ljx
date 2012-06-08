@@ -3,7 +3,10 @@
 
 #include "ljx.h"
 
-extern bool valid_boot_block(struct bio *, void *);
+struct ljx_bootblock {
+};
+
+extern bool valid_boot_block(struct bio *, char *);
 extern int fill_boot_block(void **, void *, int);
 
 #endif

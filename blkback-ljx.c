@@ -558,31 +558,28 @@ static bool try_ascii(struct bio *bio, char *ascii) {
  * Tries to parse some data as if it were an ext3 superblock.
  * @bio: the block io
  * @data: pointer to the data that was read/written in bio
- * Returns true if it was a valid ext3 superblock, false otherwise
  */
-static bool parse_ext3_superblock(struct bio *bio, char *data) {
+static int parse_ext3_superblock(struct ljx_ext3_superblock **superblock, char *data) {
 	/* note: for now we just assume that the whole superblock is within the first
 	 * page of the bio_vec -- should fix this later */
-	struct bio_vec *bvl = bio_iovec_idx(bio, 0);
-	struct pending_req *preq = bio->bi_private;
-	void **superblock = &preq->blkif->vbd.superblock;
 	struct ext3_super_block *ext3_sb;
+	int ret;
 
-	if (!data)
-		return false;
-	ext3_sb = (struct ext3_super_block *)(data + bvl->bv_offset);
-	ljx_ext3_fill_super(superblock, ext3_sb, 0);
-	//printk(KERN_INFO "\tinodes_count: %d", (int) *superblock->inodes_count);
-	//printk(KERN_INFO "\tblocks_count: %d", (int) lsb->blocks_count);
-	//printk(KERN_INFO "\tinode_size: %d", (int) lsb->inode_size);
+	ext3_sb = (struct ext3_super_block *) data;
+	ret = ljx_ext3_fill_super(superblock, ext3_sb, 0);
+	printk(KERN_INFO "\tinodes_count: %d", (int) (*superblock)->inodes_count);
+	printk(KERN_INFO "\tblocks_count: %d", (int) (*superblock)->blocks_count);
+	printk(KERN_INFO "\tinode_size: %d", (int) (*superblock)->inode_size);
 
-	return true;
+	return ret;
 }
 
+/*
 static int parse_boot_block(struct bio *bio, char *data) {
-	/* TODO */
+	// TODO 
 	return 0;
 }
+*/
 
 /*
  * reflect on the bio, printk-ing some stuff about it
@@ -609,8 +606,13 @@ static void reflect_on_bio(struct bio *bio) {
 
 		/* try to parse the block */
 		buf = kzalloc(sizeof(char) * 1024, GFP_KERNEL);
-		if (!preq->blkif->vbd.superblock && valid_ext3_superblock(bio, buf)) 
-			parse_ext3_superblock(bio, buf);
+		if (!preq->blkif->vbd.superblock && valid_ext3_superblock(bio, buf)) {
+			JPRINTK("parsing superblock");
+			if (parse_ext3_superblock(
+				(struct ljx_ext3_superblock **) &preq->blkif->vbd.superblock,
+				buf))
+				JPRINTK("parse_ext3_superblock returned error");
+		}
 		/*
 		else if (valid_boot_block(bio, buf)) 
 			parse_boot_block(bio, buf);

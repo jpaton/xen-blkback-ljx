@@ -27,6 +27,8 @@
 #ifndef __XEN_BLKIF__BACKEND__COMMON_H__
 #define __XEN_BLKIF__BACKEND__COMMON_H__
 
+#define DEBUG
+
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
@@ -49,6 +51,9 @@
 	pr_debug(DRV_PFX "(%s:%d) " fmt ".\n",		\
 		 __func__, __LINE__, ##args)
 
+#define JPRINTK(fmt, args...)				\
+	printk(KERN_INFO DRV_PFX "(%s:%d) " fmt ".\n",		\
+		 __func__, __LINE__, ##args)
 
 /* Not a real protocol.  Used to generate ring structs which contain
  * the elements common to all protocols only.  This way we get a
