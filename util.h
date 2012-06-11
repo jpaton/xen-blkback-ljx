@@ -4,6 +4,6 @@
 #include <linux/fs.h>
 #include <linux/bio.h>
 
-extern int copy_block(struct bio *, char *);
+extern int copy_block(struct bio *, char *, size_t, size_t);
 
 #endif
