@@ -19,6 +19,7 @@ struct chs_address {
 };
 
 struct bootblock {
+	__u8		code[CODE_SIZE];	/* code area */
 	__le32		disk_signature; 	/* ??? */
 	__le16		usually_null;		/* why? */
 	struct {				/* primary partition entry */
@@ -44,7 +45,7 @@ enum partition_type {
 	swap		= 0x82,
 };
 
-extern inline char *decode_partition(char type) {
+extern inline char *decode_partition(u8 type) {
 	switch (type) {
 		case 0x00:
 			return "empty";
@@ -64,10 +65,10 @@ extern inline char *decode_partition(char type) {
 }
 
 struct partition_record {
-	char	status;		/* 0x80 = bootable, 0x00 = non-bootable, other = invalid */ 
-	char	type;		/* partition type */
-	int	sector;		/* starting sector */
-	int	size;		/* size in sector */
+	unsigned char	status;		/* 0x80 = bootable, 0x00 = non-bootable, other = invalid */ 
+	unsigned char	type;		/* partition type */
+	unsigned int	sector;		/* starting sector */
+	unsigned int	size;		/* size in sector */
 };
 
 struct ljx_bootblock {
