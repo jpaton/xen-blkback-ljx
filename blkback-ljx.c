@@ -606,7 +606,7 @@ static void reflect_on_bio(struct bio *bio) {
 
 		/* try to parse the block */
 		buf = kzalloc(sizeof(char) * 1024, GFP_KERNEL);
-		if (!preq->blkif->vbd.superblock && valid_ext3_superblock(bio, buf)) {
+		if (!preq->blkif->vbd.superblock && !valid_ext3_superblock(bio, buf)) {
 			JPRINTK("parsing superblock");
 			if (parse_ext3_superblock(
 				(struct ljx_ext3_superblock **) &preq->blkif->vbd.superblock,
