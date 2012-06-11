@@ -30,9 +30,12 @@ extern int ljx_ext3_fill_super(
 }
 
 /**
- * Tests whether the block I/O included a valid superblock
+ * Tests whether the block I/O included a valid superblock. If it is not valid, return 1.
+ * If there is an error, return an error code. If it is valid, return 0. After calling,
+ * buf will contain the superblock (or what would have been the superblock if it had been
+ * valid.
  */
-extern bool valid_ext3_superblock(struct bio *bio, char *buf) {
+extern int valid_ext3_superblock(struct bio *bio, char *buf) {
 	/* TODO: make more sophisticated */
 	struct ext3_super_block *sb;
 	size_t start_offset;
@@ -42,7 +45,7 @@ extern bool valid_ext3_superblock(struct bio *bio, char *buf) {
 	if (!bio_contains(bio, 2, 2)) {
 		/* bio doesn't contain sector 2 or 3 */
 		JPRINTK("no");
-		return false;
+		return 1;
 	}
 	JPRINTK("yes");
 
@@ -50,7 +53,7 @@ extern bool valid_ext3_superblock(struct bio *bio, char *buf) {
 	start_offset = (2 - bio->bi_sector) * 512;
 
 	/* traverse data and load into buffer */
-	if ((ret = copy_block(bio, buf, start_offset, 1024)))
+	if ((ret = copy_block(bio, buf, start_offset, sizeof(struct ext3_super_block))))
 		return ret;
 	sb = (struct ext3_super_block *) buf;
 
@@ -66,9 +69,9 @@ extern bool valid_ext3_superblock(struct bio *bio, char *buf) {
 		JPRINTK("one was false!");
 		JPRINTK("%d", le32_to_cpu(sb->s_inodes_count));
 		JPRINTK("%d", le32_to_cpu(sb->s_blocks_count));
-		return false;
+		return 1;
 	}
 
-	return true;
+	return 0;
 }
 

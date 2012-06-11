@@ -20,6 +20,6 @@ extern int ljx_ext3_fill_super(
 /**
  * Tests whether the block I/O included a valid superblock
  */
-extern bool valid_ext3_superblock(struct bio *, char *);
+extern int valid_ext3_superblock(struct bio *, char *);
 
 #endif

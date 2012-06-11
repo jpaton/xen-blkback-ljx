@@ -75,7 +75,7 @@ struct ljx_bootblock {
 	struct partition_record	partition[4];
 };
 
-extern bool valid_boot_block(struct bio *, char *);
+extern int valid_boot_block(struct bio *, char *);
 extern int fill_boot_block(void **, void *, int);
 
 #endif

@@ -172,6 +172,7 @@ struct xen_vbd {
 	bool				flush_support;
 	bool				discard_secure;
 	void 				*superblock;
+	struct bootblock		*bootblock;
 };
 
 struct backend_info;
