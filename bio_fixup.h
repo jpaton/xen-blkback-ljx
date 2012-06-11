@@ -9,7 +9,7 @@
 /**
  * Checks whether some sectors is included in a bio
  */
-bool inline bio_contains(struct bio *bio, sector_t sector, size_t nr_sec) {
+static inline bool bio_contains(struct bio *bio, sector_t sector, size_t nr_sec) {
 	JPRINTK("does bio contain %u?", (unsigned int)sector);
 	return sector >= bio->bi_sector && 
 		sector + nr_sec <= bio->bi_sector + bio_sectors(bio);
