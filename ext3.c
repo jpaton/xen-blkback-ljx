@@ -3,11 +3,49 @@
 #include <linux/capability.h>
 #include <linux/ext3_fs.h>
 
+struct label;
+
 #include "ext3.h"
 #include "common.h"
 #include "label.h"
 #include "util.h"
 #include "bio_fixup.h"
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+
+/* process group descriptors */
+static int process_group_desc(
+		struct bio *bio, 
+		struct xen_vbd *vbd, 
+		struct label *label
+) {
+	struct ext3_group_desc *desc;
+	struct ljx_ext3_superblock *lsb = vbd->superblock;
+	unsigned int num_groups;
+	int i, ret;
+	void *buf;
+
+	num_groups = label->nr_sec * SECTOR_SIZE / sizeof(struct ext3_group_desc);
+	num_groups = lsb->groups_count;
+	buf = kzalloc(num_groups * sizeof(struct ext3_group_desc), GFP_KERNEL);
+	if ((ret = copy_block(bio, buf, 0, num_groups * sizeof(struct ext3_group_desc))))
+		return ret;
+
+	JPRINTK("scanning %u groups", num_groups);
+	for (i = 0; i < num_groups; i++) {
+		desc = (struct ext3_group_desc *) (buf + i * sizeof(struct ext3_group_desc));
+		JPRINTK("group %u desc:", i);
+		JPRINTK("\tblock_bitmap: %u, inode_bitmap: %u, used_dirs: %u",
+				le32_to_cpu(desc->bg_block_bitmap),
+				(unsigned int) le16_to_cpu(desc->bg_inode_bitmap),
+				(unsigned int) le16_to_cpu(desc->bg_used_dirs_count));
+	}
+
+	kfree(buf);
+
+	return 0;
+}
 
 #define LOGIC_SB_BLOCK 2 /* for now, this is just hardcoded */
 
@@ -65,7 +103,8 @@ extern int ljx_ext3_fill_super(
 ) {
 	struct ljx_ext3_superblock *lsb;
 	struct ljx_ext3_superblock **pp_lsb; 
-	unsigned int blocksize, db_count, i, block;
+	struct label *label;
+	unsigned int blocksize, db_count, i, block, groups_left;
 
 	lsb = kzalloc(sizeof(struct ljx_ext3_superblock), GFP_KERNEL);
 	if (! lsb)
@@ -108,13 +147,22 @@ extern int ljx_ext3_fill_super(
 	if (lsb->group_desc == NULL)
 		return -ENOMEM;
 	lsb->group_desc = kzalloc(db_count * sizeof(*lsb->group_desc), GFP_KERNEL);
-	JPRINTK("log block size: %d", lsb->log_block_size);
+	groups_left = lsb->groups_count;
 	for (i = 0; i < db_count; i++) {
 		block = descriptor_loc(lsb, i);
 		lsb->group_desc[i].init = false;
 		lsb->group_desc[i].location = block;
-		new_label(block, lsb->block_size, GROUP_DESC);
+		JPRINTK("group desc at %u", block);
+		label = insert_label(
+				&vbd->label_list, 
+				block, 
+				8,
+				GROUP_DESC
+		);
+		label->processor = &process_group_desc;
 	}
+	JPRINTK("Total number of groups: %u", lsb->groups_count);
+	print_label_list(&vbd->label_list);
 
 	return 0;
 }

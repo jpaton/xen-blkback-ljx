@@ -17,11 +17,16 @@ typedef enum {
 	UNLABELED
 } label_t;
 
+struct label;
+
+typedef int (process_bio_fn) (struct bio *, struct xen_vbd *, struct label *);
+
 struct label {
 	struct list_head	list;
 	sector_t		sector;
 	unsigned int		nr_sec;
 	label_t			label;
+	process_bio_fn		*processor;
 };
 
 static inline struct label *new_label(sector_t sector, unsigned int nr_sec, label_t label) {
@@ -110,6 +115,52 @@ static inline struct label *insert_label(
 	list_add(&new->list, pos);
 	merge(&new->list, head);
 	return new;
+}
+
+static inline void print_label_list(struct list_head *head) {
+	struct list_head *pos;
+	struct label *label;
+
+	JPRINTK("Label list:");
+	list_for_each(pos, head) {
+		label = list_entry(pos, struct label, list);
+		JPRINTK("\tsector: %lu, size: %u, label: %d",
+				(unsigned long) label->sector, label->nr_sec, label->label);
+	}
+}
+
+static inline unsigned int find_labels(
+		sector_t sector, 
+		unsigned int nr_sec, 
+		struct label **label,
+		struct list_head *head
+) {
+	struct list_head *pos;
+	struct label *cur, *first_label = NULL;
+	unsigned int num;
+
+	JPRINTK("searching %u - %u", (unsigned int) sector, (unsigned int) sector + nr_sec - 1);
+
+	num = 0;
+	list_for_each(pos, head) {
+		cur = list_entry(pos, struct label, list);
+		if (first_label != NULL) {
+			JPRINTK("found another label");
+			/* already found the first relevant label */
+			if (sector + nr_sec <= cur->sector)
+				break;
+			num++;
+		}
+		else if (sector >= cur->sector && sector < cur->sector + cur->nr_sec) {
+			JPRINTK("found first label");
+			first_label = cur;
+			num++;
+		}
+	}
+
+	JPRINTK("returning %u", num);
+	*label = first_label;
+	return num;
 }
 
 extern void superblock_label(struct xen_vbd *);

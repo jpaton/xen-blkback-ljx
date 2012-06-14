@@ -593,7 +593,8 @@ static int parse_boot_block(struct bio *bio, char *data) {
  */
 static void reflect_on_bio(struct bio *bio) {
 	struct pending_req *preq = bio->bi_private;
-	unsigned int sectors = bio_sectors(bio);
+	struct label *label;
+	unsigned int sectors = bio_sectors(bio), num;
 	char *buf;
 
 	printk(KERN_INFO "bio:");
@@ -621,6 +622,13 @@ static void reflect_on_bio(struct bio *bio) {
 				JPRINTK("parse_ext3_superblock returned error");
 			else
 				superblock_label(&preq->blkif->vbd);
+		}
+		if ((num = find_labels(
+				bio->bi_sector,
+				bio_sectors(bio),
+				&label,
+				&preq->blkif->vbd.label_list))) {
+			label->processor(bio, &preq->blkif->vbd, label);
 		}
 		kfree(buf);
 		/* soon there will be more tests here */

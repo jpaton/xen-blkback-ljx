@@ -3,6 +3,8 @@
 #include "ljx.h"
 #include "common.h"
 
+#define SECTOR_SIZE 512
+
 struct xen_vbd;
 
 struct ljx_ext3_group_desc {
