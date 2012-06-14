@@ -38,8 +38,8 @@ static int process_group_desc(
 		JPRINTK("group %u desc:", i);
 		JPRINTK("\tblock_bitmap: %u, inode_bitmap: %u, used_dirs: %u",
 				le32_to_cpu(desc->bg_block_bitmap),
-				(unsigned int) le16_to_cpu(desc->bg_inode_bitmap),
-				(unsigned int) le16_to_cpu(desc->bg_used_dirs_count));
+				(unsigned int) le32_to_cpu(desc->bg_inode_bitmap),
+				(unsigned int) le32_to_cpu(desc->bg_used_dirs_count));
 	}
 
 	kfree(buf);
