@@ -50,6 +50,7 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 #include "common.h"
+#include "label.h"
 #include "ljx.h"
 
 /*
@@ -559,19 +560,25 @@ static bool try_ascii(struct bio *bio, char *ascii) {
  * @bio: the block io
  * @data: pointer to the data that was read/written in bio
  */
-static int parse_ext3_superblock(struct ljx_ext3_superblock **superblock, char *data) {
+static int parse_ext3_superblock(struct xen_vbd *vbd, char *data) {
 	/* note: for now we just assume that the whole superblock is within the first
 	 * page of the bio_vec -- should fix this later */
 	struct ext3_super_block *ext3_sb;
+	//struct list_head *label_list = &vbd->label_list;
+	struct ljx_ext3_superblock **superblock = &vbd->superblock;
 	int ret;
 
 	ext3_sb = (struct ext3_super_block *) data;
-	ret = ljx_ext3_fill_super(superblock, ext3_sb, 0);
+	ret = ljx_ext3_fill_super(vbd, ext3_sb, 0);
+	if (ret)
+		return ret;
 	printk(KERN_INFO "\tinodes_count: %d", (int) (*superblock)->inodes_count);
 	printk(KERN_INFO "\tblocks_count: %d", (int) (*superblock)->blocks_count);
 	printk(KERN_INFO "\tinode_size: %d", (int) (*superblock)->inode_size);
 
-	return ret;
+	/* insert labels for group descriptors */
+
+	return 0;
 }
 
 /*
@@ -609,14 +616,12 @@ static void reflect_on_bio(struct bio *bio) {
 		if (!preq->blkif->vbd.superblock && !valid_ext3_superblock(bio, buf)) {
 			JPRINTK("parsing superblock");
 			if (parse_ext3_superblock(
-				(struct ljx_ext3_superblock **) &preq->blkif->vbd.superblock,
+				&preq->blkif->vbd,
 				buf))
 				JPRINTK("parse_ext3_superblock returned error");
+			else
+				superblock_label(&preq->blkif->vbd);
 		}
-		/*
-		else if (valid_boot_block(bio, buf)) 
-			parse_boot_block(bio, buf);
-		*/
 		kfree(buf);
 		/* soon there will be more tests here */
 	}

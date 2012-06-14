@@ -4,27 +4,117 @@
 #include <linux/ext3_fs.h>
 
 #include "ext3.h"
+#include "common.h"
+#include "label.h"
 #include "util.h"
 #include "bio_fixup.h"
+
+#define LOGIC_SB_BLOCK 2 /* for now, this is just hardcoded */
+
+#define LJX_EXT3_HAS_INCOMPAT_FEATURE(sb,mask)			\
+	( sb->feature_incompat & (mask) )
+
+#define LJX_EXT3_HAS_RO_COMPAT_FEATURE(sb,mask)			\
+	( sb->feature_ro_compat & (mask) )
+
+static inline int test_root(int a, int b)
+{
+	int num = b;
+
+	while (a > num)
+		num *= b;
+	return num == a;
+}
+
+static int ext3_group_sparse(int group)
+{
+	if (group <= 1)
+		return 1;
+	if (!(group & 1))
+		return 0;
+	return (test_root(group, 7) || test_root(group, 5) ||
+		test_root(group, 3));
+}
+
+static ext3_fsblk_t descriptor_loc(struct ljx_ext3_superblock *sb, int nr) {
+	unsigned long bg, first_meta_bg;
+	int has_super = 0;
+
+	first_meta_bg = sb->first_meta_bg;
+	if (!LJX_EXT3_HAS_INCOMPAT_FEATURE(sb, EXT3_FEATURE_INCOMPAT_META_BG) ||
+	    nr < first_meta_bg)
+		return (LOGIC_SB_BLOCK + nr + 1);
+	bg = sb->desc_per_block * nr;
+	if (! (LJX_EXT3_HAS_RO_COMPAT_FEATURE(sb,
+				EXT3_FEATURE_RO_COMPAT_SPARSE_SUPER) &&
+			!ext3_group_sparse(bg)))
+		has_super = 1;
+	return (has_super + (
+				bg * (ext3_fsblk_t)(sb->blocks_per_group) +
+				sb->first_data_block)
+	       );
+}
 
 /**
  * Based on fs/ext3/super.c:1630. Can't use bread, however. 
  */
 extern int ljx_ext3_fill_super(
-		struct ljx_ext3_superblock **pp_lsb, 
+		struct xen_vbd *vbd,
 		struct ext3_super_block *sb, 
 		int silent
 ) {
 	struct ljx_ext3_superblock *lsb;
+	struct ljx_ext3_superblock **pp_lsb; 
+	unsigned int blocksize, db_count, i, block;
 
 	lsb = kzalloc(sizeof(struct ljx_ext3_superblock), GFP_KERNEL);
 	if (! lsb)
 		return -ENOMEM;
+	pp_lsb = &vbd->superblock;
 	*pp_lsb = lsb;
 
-	lsb->inodes_count = le32_to_cpu(sb->s_inodes_count);
-	lsb->blocks_count = le32_to_cpu(sb->s_blocks_count);
-	lsb->inode_size = le32_to_cpu(sb->s_inode_size);
+	/* compute blocksize
+	minsize = bdev_logical_block_size(vbd->bdev);
+	size = EXT3_MIN_BLOCK_SIZE;
+	if (size < minsize)
+		size = minsize;
+	*/
+	blocksize = vbd->bdev->bd_block_size;
+
+	lsb->inodes_count      =  le32_to_cpu(sb->s_inodes_count);
+	lsb->blocks_count      =  le32_to_cpu(sb->s_blocks_count);
+	lsb->inode_size        =  le32_to_cpu(sb->s_inode_size);
+	lsb->first_data_block  =  le32_to_cpu(sb->s_first_data_block);
+	lsb->log_block_size    =  le32_to_cpu(sb->s_log_block_size);
+	lsb->log_frag_size     =  le32_to_cpu(sb->s_log_frag_size);
+	lsb->blocks_per_group  =  le32_to_cpu(sb->s_blocks_per_group);
+	lsb->frags_per_group   =  le32_to_cpu(sb->s_frags_per_group);
+	lsb->inodes_per_group  =  le32_to_cpu(sb->s_inodes_per_group);
+	lsb->first_inode       =  le32_to_cpu(sb->s_first_ino);
+	lsb->journal_inum      =  le32_to_cpu(sb->s_journal_inum);
+	lsb->inodes_per_block  =  blocksize / le32_to_cpu(sb->s_inode_size);
+	lsb->desc_per_block    =  blocksize / sizeof(struct ext3_group_desc);
+	lsb->groups_count      =  ((le32_to_cpu(sb->s_blocks_count) -
+			       le32_to_cpu(sb->s_first_data_block) - 1)
+				       / lsb->blocks_per_group) + 1;
+	lsb->first_meta_bg     =  le32_to_cpu(sb->s_first_meta_bg);
+	lsb->feature_incompat  =  le32_to_cpu(sb->s_feature_incompat);
+	lsb->feature_ro_compat  =  le32_to_cpu(sb->s_feature_ro_compat);
+	lsb->block_size		=  EXT3_MIN_BLOCK_SIZE << lsb->log_block_size;
+
+	db_count = DIV_ROUND_UP(lsb->groups_count, lsb->desc_per_block);
+	lsb->group_desc = kzalloc(db_count * sizeof(struct ljx_ext3_group_desc *),
+			GFP_KERNEL);
+	if (lsb->group_desc == NULL)
+		return -ENOMEM;
+	lsb->group_desc = kzalloc(db_count * sizeof(*lsb->group_desc), GFP_KERNEL);
+	JPRINTK("log block size: %d", lsb->log_block_size);
+	for (i = 0; i < db_count; i++) {
+		block = descriptor_loc(lsb, i);
+		lsb->group_desc[i].init = false;
+		lsb->group_desc[i].location = block;
+		new_label(block, lsb->block_size, GROUP_DESC);
+	}
 
 	return 0;
 }

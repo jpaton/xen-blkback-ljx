@@ -171,8 +171,10 @@ struct xen_vbd {
 	sector_t			size;
 	bool				flush_support;
 	bool				discard_secure;
-	void 				*superblock;
+	struct ljx_ext3_superblock	*superblock;
 	struct bootblock		*bootblock;
+	struct list_head		label_list;
+
 };
 
 struct backend_info;

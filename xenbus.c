@@ -294,8 +294,13 @@ static void xen_vbd_free(struct xen_vbd *vbd)
 	if (vbd->bdev)
 		blkdev_put(vbd->bdev, vbd->readonly ? FMODE_READ : FMODE_WRITE);
 	vbd->bdev = NULL;
-	vbd->superblock = NULL;
-	vbd->bootblock = NULL;
+	if (vbd->superblock) {
+		kfree(vbd->superblock);
+		vbd->superblock = NULL;
+	}
+	/* TODO: kfree all the struct labels in the list one-by-one; right now
+	 * this is a big memory leak */
+	INIT_LIST_HEAD(&vbd->label_list);
 }
 
 static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
@@ -343,8 +348,13 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 	if (q && blk_queue_secdiscard(q))
 		vbd->discard_secure = true;
 
-	vbd->superblock = NULL;
-	vbd->bootblock = NULL;
+	if (vbd->superblock) {
+		kfree(vbd->superblock);
+		vbd->superblock = NULL;
+	}
+	/* TODO: kfree all the struct labels in the list one-by-one; right now
+	 * this is a big memory leak */
+	INIT_LIST_HEAD(&vbd->label_list);
 
 	DPRINTK("Successful creation of handle=%04x (dom=%u)\n",
 		handle, blkif->domid);
