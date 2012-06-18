@@ -14,6 +14,14 @@ struct label;
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 
+static int process_inode_block (
+		struct bio *bio, 
+		struct xen_vbd *vbd, 
+		struct label *label
+) {
+	return 0;
+}
+
 /* process group descriptors */
 static int process_group_desc(
 		struct bio *bio, 
@@ -22,6 +30,7 @@ static int process_group_desc(
 ) {
 	struct ext3_group_desc *desc;
 	struct ljx_ext3_superblock *lsb = vbd->superblock;
+	struct label *tlabel;
 	unsigned int num_groups;
 	int i, ret;
 	void *buf;
@@ -35,6 +44,12 @@ static int process_group_desc(
 	JPRINTK("scanning %u groups", num_groups);
 	for (i = 0; i < num_groups; i++) {
 		desc = (struct ext3_group_desc *) (buf + i * sizeof(struct ext3_group_desc));
+		tlabel = insert_label(
+				&vbd->label_list,
+				le32_to_cpu(desc->bg_inode_table) * lsb->block_size,
+				lsb->inodes_per_group * lsb->inode_size / SECTOR_SIZE,
+				INODE_BLOCK);
+		tlabel->processor = &process_inode_block;
 		JPRINTK("group %u desc:", i);
 		JPRINTK("\tblock_bitmap: %u, inode_bitmap: %u, used_dirs: %u",
 				le32_to_cpu(desc->bg_block_bitmap),

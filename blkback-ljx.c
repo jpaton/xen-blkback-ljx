@@ -606,7 +606,7 @@ static void reflect_on_bio(struct bio *bio) {
 		else
 			printk(KERN_INFO "\ttype: read");
 
-		printk(KERN_INFO "\tbi_sector: %llx - %llx", 
+		printk(KERN_INFO "\tbi_sector: %llu - %llu", 
 				(long long) bio->bi_sector, 
 				(long long) bio->bi_sector + sectors - 1);
 		printk(KERN_INFO "\txen_blkif->domid: %d", (int) preq->blkif->domid);
