@@ -1,5 +1,5 @@
 obj-m += xen-blkback-ljx.o
-xen-blkback-ljx-objs := xenbus.o ext3.o blkback-ljx.o
+xen-blkback-ljx-objs := xenbus.o blkback-ljx.o
 
 all:
 	make -C /lib/modules/3.3.6-xen-ljx-g6304e82/build M=$(PWD) modules
