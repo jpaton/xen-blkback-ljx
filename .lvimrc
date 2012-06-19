@@ -1,5 +1,5 @@
 if !exists("g:lvimrcloaded")
 	set tags=./tags,~/workspace/linux-3.3.6/tags
-	cscope add /home/paton/workspace/linux-3.3.6/cscope.out
+	cscope add /home/paton/workspace/linux-3.3.6/cscope.out /home/paton/workspace/linux-3.3.6
 	let g:lvimrcloaded = 1
 endif
