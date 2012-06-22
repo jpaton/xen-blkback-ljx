@@ -27,7 +27,6 @@
 #ifndef __XEN_BLKIF__BACKEND__COMMON_H__
 #define __XEN_BLKIF__BACKEND__COMMON_H__
 
-#include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>
@@ -44,11 +43,14 @@
 #include <xen/interface/io/protocols.h>
 #include "ljx.h"
 
-#define DRV_PFX "xen-blkback:"
+#define DRV_PFX "xen-blkback-ljx:"
 #define DPRINTK(fmt, args...)				\
 	pr_debug(DRV_PFX "(%s:%d) " fmt ".\n",		\
 		 __func__, __LINE__, ##args)
 
+#define JPRINTK(fmt, args...)				\
+	printk(KERN_INFO DRV_PFX "(%s:%d) " fmt ".\n",		\
+		 __func__, __LINE__, ##args)
 
 /* Not a real protocol.  Used to generate ring structs which contain
  * the elements common to all protocols only.  This way we get a
@@ -302,5 +304,21 @@ static inline void blkif_get_x86_64_req(struct blkif_request *dst,
 		break;
 	}
 }
+
+/*
+ * Each outstanding request that we've passed to the lower device layers has a
+ * 'pending_req' allocated to it. Each buffer_head that completes decrements
+ * the pendcnt towards zero. When it hits zero, the specified domain has a
+ * response queued for it, with the saved 'id' passed back.
+ */
+struct pending_req {
+	struct xen_blkif	*blkif;
+	u64			id;
+	int			nr_pages;
+	atomic_t		pendcnt;
+	unsigned short		operation;
+	int			status;
+	struct list_head	free_list;
+};
 
 #endif /* __XEN_BLKIF__BACKEND__COMMON_H__ */

@@ -51,6 +51,7 @@
 #include <asm/xen/hypercall.h>
 #include "common.h"
 #include "ljx.h"
+#include "cache.h"
 
 /*
  * These are rather arbitrary. They are fairly large because adjacent requests
@@ -69,22 +70,6 @@ MODULE_PARM_DESC(reqs, "Number of blkback requests to allocate");
 /* Run-time switchable: /sys/module/blkback/parameters/ */
 static unsigned int log_stats;
 module_param(log_stats, int, 0644);
-
-/*
- * Each outstanding request that we've passed to the lower device layers has a
- * 'pending_req' allocated to it. Each buffer_head that completes decrements
- * the pendcnt towards zero. When it hits zero, the specified domain has a
- * response queued for it, with the saved 'id' passed back.
- */
-struct pending_req {
-	struct xen_blkif	*blkif;
-	u64			id;
-	int			nr_pages;
-	atomic_t		pendcnt;
-	unsigned short		operation;
-	int			status;
-	struct list_head	free_list;
-};
 
 #define BLKBACK_INVALID_HANDLE (~0)
 
@@ -515,6 +500,14 @@ static void __end_block_io_op(struct pending_req *pending_req, int error)
  */
 static void end_block_io_op(struct bio *bio, int error)
 {
+	struct pending_req *preq = bio->bi_private;
+
+	if (bio->bi_rw & REQ_WRITE && !error)
+		store_page(&preq->blkif->vbd, bio);
+	else if (!error)
+		fetch_page(&preq->blkif->vbd, bio);
+	else
+		JPRINTK("error was true");
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
 }
@@ -838,6 +831,7 @@ static int __init xen_blkif_init(void)
 	int rc = 0;
 
 	printk(KERN_INFO "LJX blkback driver initializing.");
+	JPRINTK("DPRINTK working");
 
 	if (!xen_pv_domain())
 		return -ENODEV;
@@ -886,8 +880,6 @@ static int __init xen_blkif_init(void)
 	rc = xen_blkif_xenbus_init();
 	if (rc)
 		goto failed_init;
-
-	//ljx_init();
 
 	return 0;
 

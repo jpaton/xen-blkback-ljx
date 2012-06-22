@@ -7,6 +7,6 @@ all:
 clean:
 	make -C /lib/modules/3.3.6-xen-ljx-g4d4e3e5/build M=$(PWD) clean
 
-tags:
+tags: *.c *.h
 	ctags -R .
 	cscope -Rb
