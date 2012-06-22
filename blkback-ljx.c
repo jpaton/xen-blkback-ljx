@@ -502,10 +502,8 @@ static void end_block_io_op(struct bio *bio, int error)
 {
 	struct pending_req *preq = bio->bi_private;
 
-	if (bio->bi_rw & REQ_WRITE && !error)
+	if (!error)
 		store_page(&preq->blkif->vbd, bio);
-	else if (!error)
-		fetch_page(&preq->blkif->vbd, bio);
 	else
 		JPRINTK("error was true");
 	__end_block_io_op(bio->bi_private, error);
