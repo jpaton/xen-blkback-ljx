@@ -1,0 +1,13 @@
+*.o
+*.mod.c
+*.mod.o
+*.ko
+*.o.cmd
+Module.symvers
+*.swp
+xen-blkback-ljx.ko.cmd
+cscope.out
+modules.order
+tags
+.tmp_versions/
+.xen-blkback-ljx.ko.cmd
