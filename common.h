@@ -213,7 +213,6 @@ struct xen_blkif {
 	wait_queue_head_t	waiting_to_free;
 
 	struct radix_tree_root 	block_cache;
-	spinlock_t 		cache_lock;
 };
 
 
