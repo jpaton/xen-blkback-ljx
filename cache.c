@@ -8,88 +8,92 @@
 
 /* change these if necessary */
 #define LOG_BLOCK_SIZE 	3 	/* log of block size in sectors */
-#define SECTOR_SIZE 	512	/* sector size in bytes */
-#define CACHE_SIZE	10	/* maximum cache size in blocks */
+#define SECTOR_SIZE 		512	/* sector size in bytes */
+#define CACHE_SIZE		10	/* maximum cache size in blocks */
 
-static RADIX_TREE(radix_tree, GFP_ATOMIC);
-static DEFINE_SPINLOCK(tree_lock);
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);
+static DEFINE_SPINLOCK(lru_lock);
 
 struct cache_entry {
-	struct list_head 	entry_list;
 	struct list_head	lru;
 	void 			*data;
-	domid_t			domid;
-	unsigned int 		handle;
 	bool			valid;
 	unsigned long		block;		/* block number of this entry */
 };
 
 static struct cache_entry * new_cache_entry(void) {
 	struct cache_entry *entry = kzalloc(sizeof(struct cache_entry), GFP_ATOMIC);
-	INIT_LIST_HEAD(&entry->entry_list);
 	INIT_LIST_HEAD(&entry->lru);
 	entry->valid = false;
 	return entry;
 }
 
 /**
- * located the entry list in the radix tree, creating it if necessary
+ * locates the cache entry in a given block interface's cache radix tree, creating it if
+ * necessary.
  * @block: disk block number of sought entry 
+ * @blkif: the struct xen_blkif whose tree should be searched
  **/
 static struct cache_entry *find_entry(unsigned int block, struct xen_blkif *blkif) {
-	struct list_head *entry_list;
-	struct cache_entry *pos;
+	struct cache_entry *entry;
+	struct radix_tree_root *block_cache = &blkif->block_cache;
 
-	entry_list = (struct list_head *) radix_tree_lookup(&radix_tree, block);
+	entry = (struct cache_entry *) radix_tree_lookup(block_cache, block);
 
-	if (entry_list == NULL) {
-		entry_list = kmalloc(sizeof(struct list_head), GFP_ATOMIC);
-		if (! entry_list) {
-			JPRINTK("out of memory");
+	if (entry == NULL) {
+		/* must create entry */
+		entry = new_cache_entry();
+		if (!entry)
 			return NULL;
-		}
-		INIT_LIST_HEAD(entry_list);
-		radix_tree_insert(&radix_tree, block, entry_list);
+		radix_tree_insert(block_cache, block, entry);
 	}
 
-	list_for_each_entry(pos, entry_list, entry_list) {
-		if (pos->handle == blkif->handle &&
-				pos->domid == blkif->domid) 
-			goto found;
-	}
-
-	pos = new_cache_entry();
-	pos->handle = blkif->handle;
-	pos->domid = blkif->domid;
-	list_add(&pos->entry_list, entry_list);
-found:
-	return pos;
+	return entry;
 }
 
-static void evict_page(void) {
+/**
+ * removes the entry from the LRU list and blkif's radix tree and kfree's the entry. Returns
+ * pointer to the entry's data buffer.
+ */
+static void *evict_page(struct xen_blkif *blkif) {
 	struct cache_entry *lru_entry;
-	bool last_entry = false;
+	unsigned long flags;
+	void *data;
 
+	spin_lock_irqsave(&lru_lock, flags);
+	if (list_empty(&lru_list)) {
+		JPRINTK("LRU list was empty!");
+		return NULL;
+	}
 	lru_entry = list_entry(lru_list.prev, struct cache_entry, lru);
 	lru_entry->valid = false;
-	if (lru_entry->data)
-		kfree(lru_entry->data);
-	if (lru_entry->entry_list.next == lru_entry->entry_list.prev)
-		last_entry = true;
-	list_del_init(&lru_entry->lru);
-	list_del_init(&lru_entry->entry_list);
-	if (last_entry)
-		kfree(radix_tree_delete(&radix_tree, lru_entry->block));
-	kfree(lru_entry);
+	data = lru_entry->data;
+	JPRINTK("deleting entry from lru list");
+	if (lru_entry->lru.next == LIST_POISON1)
+		JPRINTK("LIST_POISON1");
+	if (lru_entry->lru.prev == LIST_POISON2)
+		JPRINTK("LIST_POISON2");
+	list_del(&lru_entry->lru);
+	spin_unlock_irqrestore(&lru_lock, flags);
+	//kfree(lru_entry);
+
+	return data;
 }
 
 static void add_to_cache(struct cache_entry *entry) {
-	if (list_empty(&entry->lru))
+	unsigned long flags;
+
+	spin_lock_irqsave(&lru_lock, flags);
+	if (list_empty(&entry->lru)) {
+		JPRINTK("empty");
 		list_add(&entry->lru, &lru_list);
-	else 
+	}
+	else {
+		JPRINTK("moving");
 		list_move(&entry->lru, &lru_list);
+	}
+	spin_unlock_irqrestore(&lru_lock, flags);
 }
 
 /**
@@ -138,19 +142,20 @@ static int copy_buf_to_block(struct bio *bio, char *buf, size_t start_offset, si
 	return __copy_block(bio, buf, start_offset, size, false);
 }
 
+/**
+ * loads data from bio into cache 
+ */
 static int load_data(struct cache_entry *entry, struct bio *bio) {
 	int ret;
 
-	while (num_cached_blocks >= CACHE_SIZE) {
-		/* must evict something from cache */
-		evict_page();
-	}
 	entry->data = kmalloc(SECTOR_SIZE << LOG_BLOCK_SIZE, GFP_ATOMIC);
 	if (! entry->data)
 		return -ENOMEM;
+	/*
 	if ((ret = copy_block_to_buf(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE)))
-		/* error */
+		* error *
 		return ret;
+	*/
 	add_to_cache(entry);
 	entry->valid = true;
 
@@ -168,11 +173,11 @@ extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
 	unsigned long flags;
 	bool success = false;
 
-	spin_lock_irqsave(&tree_lock, flags);
+	spin_lock_irqsave(&preq->blkif->cache_lock, flags);
 	entry = find_entry(block, preq->blkif);
 	if (entry && entry->valid) 
 		success = !copy_buf_to_block(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
-	spin_unlock_irqrestore(&tree_lock, flags);
+	spin_unlock_irqrestore(&preq->blkif->cache_lock, flags);
 
 	return success;
 }
@@ -186,9 +191,20 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 	struct cache_entry *entry;
 	unsigned long flags;
 
-	spin_lock_irqsave(&tree_lock, flags);
+	spin_lock_irqsave(&preq->blkif->cache_lock, flags);
 	entry = find_entry(block, preq->blkif);
-	if (entry)
-		load_data(entry, bio);
-	spin_unlock_irqrestore(&tree_lock, flags);
+	if (entry) {
+		if (!load_data(entry, bio))
+			num_cached_blocks++;
+		else {
+			JPRINTK("failed to load data");
+			kfree(radix_tree_delete(&preq->blkif->block_cache, block));
+		}
+	}
+	while (num_cached_blocks >= CACHE_SIZE) {
+		/* must evict something from cache */
+		kfree(evict_page(preq->blkif));
+		num_cached_blocks--;
+	}
+	spin_unlock_irqrestore(&preq->blkif->cache_lock, flags);
 }

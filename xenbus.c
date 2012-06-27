@@ -118,6 +118,8 @@ static struct xen_blkif *xen_blkif_alloc(domid_t domid)
 	atomic_set(&blkif->drain, 0);
 	blkif->st_print = jiffies;
 	init_waitqueue_head(&blkif->waiting_to_free);
+	INIT_RADIX_TREE(&blkif->block_cache, GFP_ATOMIC);
+	spin_lock_init(&blkif->cache_lock);
 
 	return blkif;
 }
