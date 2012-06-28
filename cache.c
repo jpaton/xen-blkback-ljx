@@ -52,19 +52,8 @@ static struct cache_entry *find_entry(unsigned int block, struct xen_blkif *blki
 static void evict_page(struct xen_blkif *blkif) {
 	struct cache_entry *lru_entry;
 
-	if (list_empty(&lru_list)) 
-		JPRINTK("LRU list was empty!");
 	lru_entry = list_entry(lru_list.next, struct cache_entry, lru);
 	lru_entry->valid = false;
-	JPRINTK("deleting entry from lru list");
-	if (lru_entry->lru.next == LIST_POISON1)
-		JPRINTK("LIST_POISON1");
-	if (lru_entry->lru.prev == LIST_POISON2)
-		JPRINTK("LIST_POISON2");
-	if (lru_entry->lru.next == NULL)
-		JPRINTK("lru.next was NULL");
-	if (lru_entry->lru.prev == NULL)
-		JPRINTK("lru.prev was NULL");
 	list_del_init(&lru_entry->lru);
 	radix_tree_delete(lru_entry->radix_tree, lru_entry->block);
 	kfree(lru_entry);
@@ -72,14 +61,10 @@ static void evict_page(struct xen_blkif *blkif) {
 
 static void add_to_cache(struct cache_entry *entry) {
 
-	if (list_empty(&entry->lru)) {
-		JPRINTK("empty");
+	if (list_empty(&entry->lru)) 
 		list_add_tail(&entry->lru, &lru_list);
-	}
-	else {
-		JPRINTK("moving");
+	else 
 		list_rotate_left(&lru_list);
-	}
 }
 
 /**
@@ -132,13 +117,11 @@ static int copy_buf_to_block(struct bio *bio, char *buf, size_t start_offset, si
  * loads data from bio into cache 
  */
 static int load_data(struct cache_entry *entry, struct bio *bio) {
-	/*
 	int ret;
 
 	if ((ret = copy_block_to_buf(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE)))
-		* error *
+		/* error */
 		return ret;
-	*/
 
 	return 0;
 }
