@@ -10,6 +10,7 @@
 #define LOG_BLOCK_SIZE 	3 	/* log of block size in sectors */
 #define SECTOR_SIZE 		512	/* sector size in bytes */
 #define CACHE_SIZE		10	/* maximum cache size in blocks */
+#define LJX_BLOCK_SIZE		(SECTOR_SIZE << LOG_BLOCK_SIZE)
 
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);
@@ -79,6 +80,7 @@ static int __copy_block(struct bio *bio, char *buf, size_t start_offset, size_t 
 
 	byte_idx = 0;
 	__bio_for_each_segment(bvl, bio, seg_idx, 0) {
+		/* TODO: use bvec_kmap_irq instead */
 		data = kmap_atomic(bvl->bv_page);
 		if (! data) 
 			return -ENOMEM;
@@ -131,11 +133,15 @@ static int load_data(struct cache_entry *entry, struct bio *bio) {
  * and returns true. Otherwise, returns false.
  **/
 extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
-	unsigned long block = bio->bi_sector << LOG_BLOCK_SIZE;
+	unsigned long block = bio->bi_sector >> LOG_BLOCK_SIZE;
 	struct pending_req *preq = bio->bi_private;
 	struct cache_entry *entry;
 	unsigned long flags;
 	bool success = false;
+
+	if (unlikely((bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)))) {
+		return false;
+	}
 
 	spin_lock_irqsave(&lru_lock, flags);
 	entry = find_entry(block, preq->blkif);
@@ -150,11 +156,15 @@ extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
  * Possibly stores a completed bio in cache. Assumes that bio has no errors.
  **/
 extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
-	unsigned long block = bio->bi_sector << LOG_BLOCK_SIZE;
+	unsigned long block = bio->bi_sector >> LOG_BLOCK_SIZE;
 	struct pending_req *preq = bio->bi_private;
 	struct cache_entry *entry;
 	struct radix_tree_root *block_cache = &preq->blkif->block_cache;
 	unsigned long flags;
+
+	if (unlikely((bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)))) {
+		return;
+	}
 
 	spin_lock_irqsave(&lru_lock, flags);
 	entry = find_entry(block, preq->blkif);

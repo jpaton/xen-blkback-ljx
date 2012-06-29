@@ -20,4 +20,19 @@ extern void ljx_init(void);
  */
 extern int ljx_ext3_fill_super(void **, void *, int);
 
+/*
+ * If bio->bi_dev is a partition, remap the location
+ * <taken from linux-3.3.6/block/blk-core.c>
+ */
+static inline void blk_partition_remap(struct bio *bio)
+{
+	struct block_device *bdev = bio->bi_bdev;
+
+	if (bio_sectors(bio) && bdev != bdev->bd_contains) {
+		struct hd_struct *p = bdev->bd_part;
+
+		bio->bi_sector += p->start_sect;
+		bio->bi_bdev = bdev->bd_contains;
+	}
+}
 #endif

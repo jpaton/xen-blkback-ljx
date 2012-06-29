@@ -502,15 +502,17 @@ static void end_block_io_op(struct bio *bio, int error)
 {
 	struct pending_req *preq = bio->bi_private;
 
-	if (!error)
-		store_page(&preq->blkif->vbd, bio);
-	else
+	if (!error) {
+		if ((preq->operation == BLKIF_OP_READ || preq->operation == BLKIF_OP_WRITE)
+			       && bio_flagged(bio, BIO_UPTODATE)) {
+			store_page(&preq->blkif->vbd, bio);
+		}
+	} else {
 		JPRINTK("error was true");
+	}
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
 }
-
-
 
 /*
  * Function to copy the from the ring buffer the 'struct blkif_request'
@@ -662,7 +664,6 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 		    (req->u.rw.seg[i].last_sect < req->u.rw.seg[i].first_sect))
 			goto fail_response;
 		preq.nr_sects += seg[i].nsec;
-
 	}
 
 	if (xen_vbd_translate(&preq, blkif, operation) != 0) {
@@ -748,11 +749,22 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	 */
 	atomic_set(&pending_req->pendcnt, nbio);
 
+	if (nbio == 1 && operation == READ && fetch_page(&blkif->vbd, bio)) {
+		bio->bi_rw |= operation;
+		blk_partition_remap(bio);
+		set_bit(BIO_UPTODATE, &bio->bi_flags);
+
+		__end_block_io_op(bio->bi_private, 0);
+		bio_put(bio);
+		return 0;
+	}
+
 	/* Get a reference count for the disk queue and start sending I/O */
 	blk_start_plug(&plug);
 
-	for (i = 0; i < nbio; i++)
+	for (i = 0; i < nbio; i++) {
 		submit_bio(operation, biolist[i]);
+	}
 
 	/* Let the I/Os go.. */
 	blk_finish_plug(&plug);
@@ -829,7 +841,6 @@ static int __init xen_blkif_init(void)
 	int rc = 0;
 
 	printk(KERN_INFO "LJX blkback driver initializing.");
-	JPRINTK("DPRINTK working");
 
 	if (!xen_pv_domain())
 		return -ENODEV;
