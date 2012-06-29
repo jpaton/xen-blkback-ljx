@@ -162,7 +162,10 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 	struct radix_tree_root *block_cache = &preq->blkif->block_cache;
 	unsigned long flags;
 
-	if (unlikely((bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)))) {
+	if (unlikely(
+		(bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)) ||
+		bio_sectors(bio) != (1 << LOG_BLOCK_SIZE)
+	)) {
 		return;
 	}
 
@@ -193,6 +196,25 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 		/* must evict something from cache */
 		evict_page(preq->blkif);
 		num_cached_blocks--;
+	}
+
+	spin_unlock_irqrestore(&lru_lock, flags);
+}
+
+/**
+ * Marks an entry as invalid
+ */
+extern void invalidate(struct bio *bio) {
+	unsigned long block = bio->bi_sector >> LOG_BLOCK_SIZE;
+	struct pending_req *preq = bio->bi_private;
+	struct cache_entry *entry;
+	unsigned long flags;
+
+	spin_lock_irqsave(&lru_lock, flags);
+
+	entry = find_entry(block, preq->blkif);
+	if (entry) {
+		entry->valid = false;
 	}
 
 	spin_unlock_irqrestore(&lru_lock, flags);

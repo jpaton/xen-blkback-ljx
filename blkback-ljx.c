@@ -763,6 +763,7 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	blk_start_plug(&plug);
 
 	for (i = 0; i < nbio; i++) {
+		invalidate(bio);
 		submit_bio(operation, biolist[i]);
 	}
 
