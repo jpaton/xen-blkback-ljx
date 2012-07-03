@@ -8,9 +8,9 @@
 
 /* change these if necessary */
 #define LOG_BLOCK_SIZE 	3 	/* log of block size in sectors */
-#define SECTOR_SIZE 		512	/* sector size in bytes */
-#define CACHE_SIZE		10	/* maximum cache size in blocks */
-#define LJX_BLOCK_SIZE		(SECTOR_SIZE << LOG_BLOCK_SIZE)
+#define SECTOR_SIZE 	512	/* sector size in bytes */
+#define CACHE_SIZE	2000	/* maximum cache size in blocks */
+#define LJX_BLOCK_SIZE	(SECTOR_SIZE << LOG_BLOCK_SIZE)
 
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);
@@ -73,28 +73,31 @@ static void add_to_cache(struct cache_entry *entry) {
  * direction == false: copy buf to block
  */
 static int __copy_block(struct bio *bio, char *buf, size_t start_offset, size_t size, bool direction) {
-	unsigned int seg_idx, intra_idx, byte_idx;
+	unsigned int seg_idx, intra_idx;
+	unsigned long flags;
 	struct bio_vec *bvl;
 	char *bufPtr = buf;
 	char *data;
+	int num_bytes_copied;
 
-	byte_idx = 0;
 	__bio_for_each_segment(bvl, bio, seg_idx, 0) {
-		/* TODO: use bvec_kmap_irq instead */
-		data = kmap_atomic(bvl->bv_page);
+		data = bvec_kmap_irq(bvl, &flags);
 		if (! data) 
 			return -ENOMEM;
-		for (intra_idx = bvl->bv_offset;
-				bufPtr < buf + size && intra_idx < bvl->bv_offset + bvl->bv_len;
-				intra_idx++, byte_idx++)
-			if (byte_idx >= start_offset) {
-				if (direction)
-					*(bufPtr++) = data[intra_idx];
-				else
-					data[intra_idx] = *(bufPtr++);
-			}
-		kunmap_atomic(data);
+		for (intra_idx = 0; 
+				intra_idx <= bvl->bv_len && bufPtr < buf + size; 
+				intra_idx++, bufPtr++) {
+			if (direction)
+				*bufPtr = data[intra_idx];
+			else
+				data[intra_idx] = *bufPtr;
+		}
+		bvec_kunmap_irq(data, &flags);
 	}
+
+	num_bytes_copied = (int) (bufPtr - buf);
+	if (num_bytes_copied != 4096)
+		DPRINTK("copied a total of %d bytes", (int) (bufPtr - buf));
 
 	return 0;
 }
@@ -119,13 +122,7 @@ static int copy_buf_to_block(struct bio *bio, char *buf, size_t start_offset, si
  * loads data from bio into cache 
  */
 static int load_data(struct cache_entry *entry, struct bio *bio) {
-	int ret;
-
-	if ((ret = copy_block_to_buf(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE)))
-		/* error */
-		return ret;
-
-	return 0;
+	return copy_block_to_buf(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
 }
 
 /**
@@ -147,6 +144,10 @@ extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
 	entry = find_entry(block, preq->blkif);
 	if (entry && entry->valid) 
 		success = !copy_buf_to_block(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
+	if (success)
+		DPRINTK("HIT on block %lu", block);
+	else
+		DPRINTK("MISS on block %lu", block);
 	spin_unlock_irqrestore(&lru_lock, flags);
 
 	return success;
@@ -178,15 +179,17 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 			return;
 		radix_tree_insert(block_cache, block, entry);
 		entry->radix_tree = block_cache;
+		entry->block = block;
 		num_cached_blocks++;
 	}
 
 	if (!load_data(entry, bio)) { 
 		entry->valid = true;
 		add_to_cache(entry);
+		DPRINTK("loaded block %lu", block);
 	}
 	else {
-		JPRINTK("failed to load data");
+		DPRINTK("failed to load block %lu", block);
 		num_cached_blocks--;
 		list_del_init(&entry->lru);
 		kfree(radix_tree_delete(&preq->blkif->block_cache, block));
@@ -214,6 +217,7 @@ extern void invalidate(struct bio *bio) {
 
 	entry = find_entry(block, preq->blkif);
 	if (entry) {
+		// TODO: evict instead
 		entry->valid = false;
 	}
 

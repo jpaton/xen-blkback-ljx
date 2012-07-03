@@ -503,12 +503,12 @@ static void end_block_io_op(struct bio *bio, int error)
 	struct pending_req *preq = bio->bi_private;
 
 	if (!error) {
-		if ((preq->operation == BLKIF_OP_READ || preq->operation == BLKIF_OP_WRITE)
-			       && bio_flagged(bio, BIO_UPTODATE)) {
+		if ((preq->operation == BLKIF_OP_READ)
+			       && test_bit(BIO_UPTODATE, &bio->bi_flags)) {
 			store_page(&preq->blkif->vbd, bio);
 		}
 	} else {
-		JPRINTK("error was true");
+		DPRINTK("error was true");
 	}
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
@@ -596,6 +596,38 @@ do_block_io_op(struct xen_blkif *blkif)
 
 	return more_to_do;
 }
+
+static void
+trace_bio(struct bio *bio, struct blkif_request *req) {
+	char *operation;
+	unsigned long block = bio->bi_sector >> 3;
+	unsigned int size = bio_sectors(bio) * 512;
+
+	switch (req->operation) {
+	case BLKIF_OP_READ:
+		operation = "READ";
+		break;
+	case BLKIF_OP_WRITE:
+		operation = "WRITE";
+		break;
+	case BLKIF_OP_WRITE_BARRIER:
+		operation = "DRAIN";
+		break;
+	case BLKIF_OP_FLUSH_DISKCACHE:
+		operation = "FLUSH";
+		break;
+	default:
+		operation = NULL; /* make gcc happy */
+		goto fail;
+		break;
+	}
+
+	DPRINTK("%s operation: block %lu, size %d", operation, block, size);
+
+fail:
+	return;
+}
+
 /*
  * Transmutation of the 'struct blkif_request' to a proper 'struct bio'
  * and call the 'submit_bio' to pass it to the underlying storage.
@@ -749,11 +781,15 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	 */
 	atomic_set(&pending_req->pendcnt, nbio);
 
-	if (nbio == 1 && operation == READ && fetch_page(&blkif->vbd, bio)) {
+	if (
+			nbio == 1 && 
+			operation == READ && 
+			bio_sectors(biolist[0]) == 8 &&
+			fetch_page(&blkif->vbd, bio)
+	) {
 		bio->bi_rw |= operation;
 		blk_partition_remap(bio);
 		set_bit(BIO_UPTODATE, &bio->bi_flags);
-
 		__end_block_io_op(bio->bi_private, 0);
 		bio_put(bio);
 		return 0;
@@ -763,8 +799,9 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	blk_start_plug(&plug);
 
 	for (i = 0; i < nbio; i++) {
-		invalidate(bio);
 		submit_bio(operation, biolist[i]);
+		invalidate(bio);
+		trace_bio(bio, req);
 	}
 
 	/* Let the I/Os go.. */

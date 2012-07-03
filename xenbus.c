@@ -202,6 +202,7 @@ void xen_blkif_free(struct xen_blkif *blkif)
 	if (!atomic_dec_and_test(&blkif->refcnt))
 		BUG();
 	kmem_cache_free(xen_blkif_cachep, blkif);
+	JPRINTK("blkif freed");
 }
 
 int __init xen_blkif_interface_init(void)
@@ -317,14 +318,14 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 				 FMODE_READ : FMODE_WRITE, NULL);
 
 	if (IS_ERR(bdev)) {
-		DPRINTK("xen_vbd_create: device %08x could not be opened.\n",
+		JPRINTK("xen_vbd_create: device %08x could not be opened.\n",
 			vbd->pdevice);
 		return -ENOENT;
 	}
 
 	vbd->bdev = bdev;
 	if (vbd->bdev->bd_disk == NULL) {
-		DPRINTK("xen_vbd_create: device %08x doesn't exist.\n",
+		JPRINTK("xen_vbd_create: device %08x doesn't exist.\n",
 			vbd->pdevice);
 		xen_vbd_free(vbd);
 		return -ENOENT;
@@ -345,7 +346,7 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 
 	vbd->superblock = NULL;
 
-	DPRINTK("Successful creation of handle=%04x (dom=%u)\n",
+	JPRINTK("Successful creation of handle=%04x (dom=%u)\n",
 		handle, blkif->domid);
 	return 0;
 }
@@ -353,7 +354,7 @@ static int xen_blkbk_remove(struct xenbus_device *dev)
 {
 	struct backend_info *be = dev_get_drvdata(&dev->dev);
 
-	DPRINTK("");
+	JPRINTK("");
 
 	if (be->major || be->minor)
 		xenvbd_sysfs_delif(dev);
