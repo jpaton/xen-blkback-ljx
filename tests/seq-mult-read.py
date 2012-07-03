@@ -13,32 +13,35 @@ from multiprocessing import Process
 block_size  =  4096
 nthreads    =  4
 
-def buf_eq(m1, m2):
+def buf_eq(m1, m2, offset):
     """
-    Tests whether two mmap's are the same byte-by-byte. Returns True if they
-    are, False otherwise.
+    Tests whether m1 == m2[offset:offset + len(m1)]
     """
-    if len(m1) != len(m2):
-        return False
-    for byte1, byte2 in zip(m1, m2):
-        if byte1 != byte2:
+    for byte in range(len(m1)):
+        if m1[byte] != m2[offset + byte]:
             return False
     return True
 
+def read_in_file(filename, starting_block, num_blocks):
+    global m_file
+    
+    m_file = mmap.mmap(-1, block_size * num_blocks)
+    with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
+        f.seek(starting_block * block_size)
+        for block in range(num_blocks):
+            m_file.write(f.read(block_size))
+
 def run_test(filename, starting_block, num_blocks):
+    global m_file
+
+    m = mmap.mmap(-1, block_size)
     with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
         while True:
-            blocks = list()
             f.seek(starting_block * block_size)
-            for block in range(starting_block, starting_block + num_blocks):
-                m = mmap.mmap(-1, block_size)
+            for block in range(num_blocks):
+                m.seek(0)
                 m.write(f.read(block_size))
-                blocks.append(m)
-            f.seek(starting_block * block_size)
-            for old in blocks:
-                m = mmap.mmap(-1, block_size)
-                m.write(f.read(block_size))
-                if not buf_eq(m, old):
+                if not buf_eq(m, m_file, block * block_size):
                     print "error"
 
 def main():
@@ -49,6 +52,7 @@ def main():
     num_blocks = int(sys.argv[3])
     filename = sys.argv[1]
     processes = list()
+    read_in_file(filename, starting_block, num_blocks)
     for num in range(nthreads):
         process = Process(target = run_test, args = (filename, starting_block, num_blocks))
         process.start()
