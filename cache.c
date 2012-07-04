@@ -5,12 +5,7 @@
 #include <linux/spinlock.h>
 
 #include "common.h"
-
-/* change these if necessary */
-#define LOG_BLOCK_SIZE 	3 	/* log of block size in sectors */
-#define SECTOR_SIZE 	512	/* sector size in bytes */
-#define CACHE_SIZE	2000	/* maximum cache size in blocks */
-#define LJX_BLOCK_SIZE	(SECTOR_SIZE << LOG_BLOCK_SIZE)
+#include "cache.h"
 
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);

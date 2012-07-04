@@ -88,6 +88,21 @@ struct xen_blkbk {
 
 static struct xen_blkbk *blkbk;
 
+struct listed_bio {
+	struct list_head biolist;
+	struct bio *bio;
+};
+
+static inline struct listed_bio *alloc_listed_bio(unsigned int nr_iovecs) {
+	/* TODO: switch to using kcache */
+	struct listed_bio *ret = kmalloc(sizeof(struct listed_bio), GFP_KERNEL);
+
+	ret->bio = bio_alloc(GFP_KERNEL, nr_iovecs);
+	INIT_LIST_HEAD(&ret->biolist);
+
+	return ret;
+}
+
 /*
  * Little helpful macro to figure out the index and virtual address of the
  * pending_pages[..]. For each 'pending_req' we have have up to
@@ -500,8 +515,9 @@ static void __end_block_io_op(struct pending_req *pending_req, int error)
  */
 static void end_block_io_op(struct bio *bio, int error)
 {
-	struct pending_req *preq = bio->bi_private;
+	//struct pending_req *preq = bio->bi_private;
 
+	/*
 	if (!error) {
 		if ((preq->operation == BLKIF_OP_READ)
 			       && test_bit(BIO_UPTODATE, &bio->bi_flags)) {
@@ -510,6 +526,7 @@ static void end_block_io_op(struct bio *bio, int error)
 	} else {
 		DPRINTK("error was true");
 	}
+	*/
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
 }
@@ -639,8 +656,11 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	struct phys_req preq;
 	struct seg_buf seg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 	unsigned int nseg;
+	struct listed_bio *listed_bio = NULL;
+	LIST_HEAD(biolist);
+	struct list_head *pos, *n;
 	struct bio *bio = NULL;
-	struct bio *biolist[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+	struct bio_vec *bvl;
 	int i, nbio = 0;
 	int operation;
 	struct blk_plug plug;
@@ -741,23 +761,36 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	xen_blkif_get(blkif);
 
 	for (i = 0; i < nseg; i++) {
+		/* try to copy data from cache into page;
+		 * if success, skip the while loop
+		 * otherwise, do the while loop
+		 * if you skip the while loop, you still have to increase sector number */
+//		if (fetch_page(
+//			&blkif->vbd,
+//			blkbk->pending_page(pending_req, i),
+//			preq.sector_number,
+//			seg[i].nsec
+//		)) 
+//			goto skip_bio;
 		while ((bio == NULL) ||
 		       (bio_add_page(bio,
 				     blkbk->pending_page(pending_req, i),
 				     seg[i].nsec << 9,
 				     seg[i].buf & ~PAGE_MASK) == 0)) {
 
-			bio = bio_alloc(GFP_KERNEL, nseg-i);
-			if (unlikely(bio == NULL))
+			listed_bio = alloc_listed_bio(nseg - i);
+			if (unlikely(listed_bio == NULL || listed_bio->bio == NULL))
 				goto fail_put_bio;
-
-			biolist[nbio++] = bio;
+			bio = listed_bio->bio;
+			
+			list_add(&listed_bio->biolist, &biolist);
+			nbio++;
 			bio->bi_bdev    = preq.bdev;
 			bio->bi_private = pending_req;
 			bio->bi_end_io  = end_block_io_op;
 			bio->bi_sector  = preq.sector_number;
 		}
-
+ //skip_bio:
 		preq.sector_number += seg[i].nsec;
 	}
 
@@ -765,11 +798,13 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	if (!bio) {
 		BUG_ON(operation != WRITE_FLUSH);
 
-		bio = bio_alloc(GFP_KERNEL, 0);
+		listed_bio = alloc_listed_bio(0);
+		bio = listed_bio->bio;
 		if (unlikely(bio == NULL))
 			goto fail_put_bio;
 
-		biolist[nbio++] = bio;
+		list_add(&listed_bio->biolist, &biolist);
+		nbio++;
 		bio->bi_bdev    = preq.bdev;
 		bio->bi_private = pending_req;
 		bio->bi_end_io  = end_block_io_op;
@@ -781,27 +816,30 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	 */
 	atomic_set(&pending_req->pendcnt, nbio);
 
-	if (
-			nbio == 1 && 
-			operation == READ && 
-			bio_sectors(biolist[0]) == 8 &&
-			fetch_page(&blkif->vbd, bio)
-	) {
-		bio->bi_rw |= operation;
-		blk_partition_remap(bio);
-		set_bit(BIO_UPTODATE, &bio->bi_flags);
-		__end_block_io_op(bio->bi_private, 0);
-		bio_put(bio);
-		return 0;
-	}
+//	if (
+//			nbio == 1 && 
+//			operation == READ && 
+//			bio_sectors(biolist[0]) == 8 &&
+//			fetch_page(&blkif->vbd, bio)
+//	) {
+//		bio->bi_rw |= operation;
+//		blk_partition_remap(bio);
+//		set_bit(BIO_UPTODATE, &bio->bi_flags);
+//		__end_block_io_op(bio->bi_private, 0);
+//		bio_put(bio);
+//		return 0;
+//	}
 
 	/* Get a reference count for the disk queue and start sending I/O */
 	blk_start_plug(&plug);
 
-	for (i = 0; i < nbio; i++) {
-		submit_bio(operation, biolist[i]);
+	list_for_each_safe(pos, n, &biolist) {
+		listed_bio = list_entry(pos, struct listed_bio, biolist);
+		bio = listed_bio->bio;
+		submit_bio(operation, bio);
 		invalidate(bio);
 		trace_bio(bio, req);
+		kfree(listed_bio);
 	}
 
 	/* Let the I/Os go.. */
@@ -820,12 +858,18 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	/* Haven't submitted any bio's yet. */
 	make_response(blkif, req->u.rw.id, req->operation, BLKIF_RSP_ERROR);
 	free_req(pending_req);
+	list_for_each_safe(pos, n, &biolist) 
+		kfree(list_entry(pos, struct listed_bio, biolist));
 	msleep(1); /* back off a bit */
 	return -EIO;
 
  fail_put_bio:
-	for (i = 0; i < nbio; i++)
-		bio_put(biolist[i]);
+	list_for_each_safe(pos, n, &biolist) {
+		listed_bio = list_entry(pos, struct listed_bio, biolist);
+		bio = listed_bio->bio;
+		bio_put(bio);
+		kfree(listed_bio);
+	}
 	__end_block_io_op(pending_req, -EINVAL);
 	msleep(1); /* back off a bit */
 	return -EIO;
