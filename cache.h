@@ -1,7 +1,13 @@
 #ifndef _CACHE_H
 #define _CACHE_H
 
-extern void *fetch_page(struct xen_vbd *, struct bio *);
+/* change these if necessary */
+#define LOG_BLOCK_SIZE 	3 	/* log of block size in sectors */
+#define SECTOR_SIZE 	512	/* sector size in bytes */
+#define CACHE_SIZE	2000	/* maximum cache size in blocks */
+#define LJX_BLOCK_SIZE	(SECTOR_SIZE << LOG_BLOCK_SIZE)
+
+extern bool fetch_page(struct xen_vbd *, struct bio *);
 
 extern void store_page(struct xen_vbd *, struct bio *);
 
