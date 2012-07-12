@@ -95,8 +95,10 @@ struct listed_bio {
 
 static inline struct listed_bio *alloc_listed_bio(unsigned int nr_iovecs) {
 	/* TODO: switch to using kcache */
-	struct listed_bio *ret = kmalloc(sizeof(struct listed_bio), GFP_KERNEL);
+	struct listed_bio *ret = kmalloc(sizeof(struct listed_bio), GFP_ATOMIC);
 
+	if (!ret)
+		return NULL;
 	ret->bio = bio_alloc(GFP_KERNEL, nr_iovecs);
 	INIT_LIST_HEAD(&ret->biolist);
 
@@ -515,18 +517,24 @@ static void __end_block_io_op(struct pending_req *pending_req, int error)
  */
 static void end_block_io_op(struct bio *bio, int error)
 {
-	//struct pending_req *preq = bio->bi_private;
+	struct pending_req *preq = bio->bi_private;
+	struct bio_vec *bvl;
+	unsigned int i, sector_number;
 
-	/*
 	if (!error) {
 		if ((preq->operation == BLKIF_OP_READ)
 			       && test_bit(BIO_UPTODATE, &bio->bi_flags)) {
-			store_page(&preq->blkif->vbd, bio);
+			sector_number = bio->bi_sector;
+			__bio_for_each_segment(bvl, bio, i, 0) {
+				store_page(preq->blkif, bvl->bv_page, sector_number);
+				sector_number += bvl->bv_len / SECTOR_SIZE;
+				if (bvl->bv_offset || bvl->bv_len != 4096)
+					DPRINTK("bvl seems wrong");
+			}
 		}
 	} else {
 		DPRINTK("error was true");
 	}
-	*/
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
 }
@@ -645,6 +653,20 @@ fail:
 	return;
 }
 
+/**
+ * Remap the sector if necessary
+ *
+ * Based on block/blk-core.c:blk_partition_remap
+ */
+static inline unsigned int partition_remap(unsigned int sector, struct block_device *bdev) {
+	if (bdev != bdev->bd_contains) {
+		struct hd_struct *p = bdev->bd_part;
+		sector += p->start_sect;
+	} 
+
+	return sector;
+}
+
 /*
  * Transmutation of the 'struct blkif_request' to a proper 'struct bio'
  * and call the 'submit_bio' to pass it to the underlying storage.
@@ -660,11 +682,11 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	LIST_HEAD(biolist);
 	struct list_head *pos, *n;
 	struct bio *bio = NULL;
-	struct bio_vec *bvl;
 	int i, nbio = 0;
 	int operation;
 	struct blk_plug plug;
 	bool drain = false;
+	bool cache_hit = true;
 
 	switch (req->operation) {
 	case BLKIF_OP_READ:
@@ -765,13 +787,19 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 		 * if success, skip the while loop
 		 * otherwise, do the while loop
 		 * if you skip the while loop, you still have to increase sector number */
-//		if (fetch_page(
-//			&blkif->vbd,
-//			blkbk->pending_page(pending_req, i),
-//			preq.sector_number,
-//			seg[i].nsec
-//		)) 
-//			goto skip_bio;
+		if (operation == READ &&
+			!(preq.sector_number & ((1 << LOG_BLOCK_SIZE) - 1)) &&
+			!(seg[i].nsec & ((1 << LOG_BLOCK_SIZE) - 1)) &&
+			fetch_page(
+				blkif,
+				blkbk->pending_page(pending_req, i),
+				partition_remap(preq.sector_number, preq.bdev),
+				seg[i].nsec
+		)) {
+			bio = NULL;
+			goto skip_bio;
+		}
+		cache_hit = false;
 		while ((bio == NULL) ||
 		       (bio_add_page(bio,
 				     blkbk->pending_page(pending_req, i),
@@ -790,12 +818,12 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 			bio->bi_end_io  = end_block_io_op;
 			bio->bi_sector  = preq.sector_number;
 		}
- //skip_bio:
+ skip_bio:
 		preq.sector_number += seg[i].nsec;
 	}
 
 	/* This will be hit if the operation was a flush or discard. */
-	if (!bio) {
+	if (!bio && nseg == 0) {
 		BUG_ON(operation != WRITE_FLUSH);
 
 		listed_bio = alloc_listed_bio(0);
@@ -808,6 +836,19 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 		bio->bi_bdev    = preq.bdev;
 		bio->bi_private = pending_req;
 		bio->bi_end_io  = end_block_io_op;
+	}
+
+	/* This will be hit if the entire bio was satisfied by the cache */
+	if (nseg > 0 && cache_hit) {
+		/* need to set to 1 so the response will trigger in __end_block_io_op */
+		if (operation == READ) {
+			DPRINTK("entire bio satisfied by cache");
+			atomic_set(&pending_req->pendcnt, 1);
+			__end_block_io_op(pending_req, 0);
+			return 0;
+		} else {
+			DPRINTK("operation was not read!!!");
+		}
 	}
 
 	/*

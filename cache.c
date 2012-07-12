@@ -21,6 +21,8 @@ struct cache_entry {
 
 static struct cache_entry * new_cache_entry(void) {
 	struct cache_entry *entry = kmalloc(sizeof(struct cache_entry), GFP_ATOMIC);
+	if (unlikely(!entry))
+		return NULL;
 	INIT_LIST_HEAD(&entry->lru);
 	entry->valid = false;
 	return entry;
@@ -67,32 +69,17 @@ static void add_to_cache(struct cache_entry *entry) {
  * direction == true: copy block to buf
  * direction == false: copy buf to block
  */
-static int __copy_block(struct bio *bio, char *buf, size_t start_offset, size_t size, bool direction) {
-	unsigned int seg_idx, intra_idx;
-	unsigned long flags;
-	struct bio_vec *bvl;
-	char *bufPtr = buf;
+static int __copy_block(struct page *page, char *buf, size_t start_offset, size_t size, bool direction) {
 	char *data;
-	int num_bytes_copied;
 
-	__bio_for_each_segment(bvl, bio, seg_idx, 0) {
-		data = bvec_kmap_irq(bvl, &flags);
-		if (! data) 
-			return -ENOMEM;
-		for (intra_idx = 0; 
-				intra_idx <= bvl->bv_len && bufPtr < buf + size; 
-				intra_idx++, bufPtr++) {
-			if (direction)
-				*bufPtr = data[intra_idx];
-			else
-				data[intra_idx] = *bufPtr;
-		}
-		bvec_kunmap_irq(data, &flags);
-	}
-
-	num_bytes_copied = (int) (bufPtr - buf);
-	if (num_bytes_copied != 4096)
-		DPRINTK("copied a total of %d bytes", (int) (bufPtr - buf));
+	data = kmap_atomic(page);
+	if (! data) 
+		return -ENOMEM;
+	if (direction)
+		memcpy(buf, data, size);
+	else
+		memcpy(data, buf, size);
+	kunmap_atomic(data);
 
 	return 0;
 }
@@ -101,44 +88,48 @@ static int __copy_block(struct bio *bio, char *buf, size_t start_offset, size_t 
  * Copies bio's data into buf. Buf had better be large enough!
  * Starts from byte start_offset and does size bytes.
  */
-static int copy_block_to_buf(struct bio *bio, char *buf, size_t start_offset, size_t size) {
-	return __copy_block(bio, buf, start_offset, size, true);
+static int copy_block_to_buf(struct page *page, char *buf, size_t start_offset, size_t size) {
+	return __copy_block(page, buf, start_offset, size, true);
 }
 
 /**
  * Copies buf into bio's data.
  * Starts from byte start_offset and does size bytes.
  */
-static int copy_buf_to_block(struct bio *bio, char *buf, size_t start_offset, size_t size) {
-	return __copy_block(bio, buf, start_offset, size, false);
+static int copy_buf_to_block(struct page *page, char *buf, size_t start_offset, size_t size) {
+	return __copy_block(page, buf, start_offset, size, false);
 }
 
 /**
  * loads data from bio into cache 
  */
-static int load_data(struct cache_entry *entry, struct bio *bio) {
-	return copy_block_to_buf(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
+static int load_data(struct cache_entry *entry, struct page *page) {
+	return copy_block_to_buf(page, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
 }
 
 /**
  * checks whether bio can be satisfied by cache. If so, satisfies the request
  * and returns true. Otherwise, returns false.
  **/
-extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
-	unsigned long block = bio->bi_sector >> LOG_BLOCK_SIZE;
-	struct pending_req *preq = bio->bi_private;
+extern bool fetch_page(
+		struct xen_blkif *blkif, 
+		struct page *page, 
+		unsigned int sector_number, 
+		unsigned int nsec
+) {
+	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
 	unsigned long flags;
 	bool success = false;
 
-	if (unlikely((bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)))) {
+	if (unlikely((sector_number & ((1 << LOG_BLOCK_SIZE) - 1)))) {
 		return false;
 	}
 
 	spin_lock_irqsave(&lru_lock, flags);
-	entry = find_entry(block, preq->blkif);
+	entry = find_entry(block, blkif);
 	if (entry && entry->valid) 
-		success = !copy_buf_to_block(bio, entry->data, 0, SECTOR_SIZE << LOG_BLOCK_SIZE);
+		success = !copy_buf_to_block(page, entry->data, 0, nsec * SECTOR_SIZE);
 	if (success)
 		DPRINTK("HIT on block %lu", block);
 	else
@@ -151,22 +142,19 @@ extern bool fetch_page(struct xen_vbd *vbd, struct bio *bio) {
 /**
  * Possibly stores a completed bio in cache. Assumes that bio has no errors.
  **/
-extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
-	unsigned long block = bio->bi_sector >> LOG_BLOCK_SIZE;
-	struct pending_req *preq = bio->bi_private;
+extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int sector_number) {
+	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
-	struct radix_tree_root *block_cache = &preq->blkif->block_cache;
+	struct radix_tree_root *block_cache = &blkif->block_cache;
 	unsigned long flags;
 
-	if (unlikely(
-		(bio->bi_sector & ((1 << LOG_BLOCK_SIZE) - 1)) ||
-		bio_sectors(bio) != (1 << LOG_BLOCK_SIZE)
-	)) {
+	if (unlikely(sector_number & ((1 << LOG_BLOCK_SIZE) - 1))) {
 		return;
 	}
 
 	spin_lock_irqsave(&lru_lock, flags);
-	entry = find_entry(block, preq->blkif);
+
+	entry = find_entry(block, blkif);
 	if (!entry) {
 		/* must create entry */
 		entry = new_cache_entry();
@@ -177,8 +165,7 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 		entry->block = block;
 		num_cached_blocks++;
 	}
-
-	if (!load_data(entry, bio)) { 
+	if (!load_data(entry, page)) { 
 		entry->valid = true;
 		add_to_cache(entry);
 		DPRINTK("loaded block %lu", block);
@@ -187,12 +174,11 @@ extern void store_page(struct xen_vbd *vbd, struct bio *bio) {
 		DPRINTK("failed to load block %lu", block);
 		num_cached_blocks--;
 		list_del_init(&entry->lru);
-		kfree(radix_tree_delete(&preq->blkif->block_cache, block));
+		kfree(radix_tree_delete(&blkif->block_cache, block));
 	}
-
 	while (num_cached_blocks >= CACHE_SIZE) {
 		/* must evict something from cache */
-		evict_page(preq->blkif);
+		evict_page(blkif);
 		num_cached_blocks--;
 	}
 

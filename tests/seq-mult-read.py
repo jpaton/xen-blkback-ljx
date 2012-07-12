@@ -9,6 +9,7 @@ Open a file specified on the command line for direct IO and read it block-by-blo
 import sys, os
 import mmap
 from multiprocessing import Process
+import directio
 
 block_size  =  4096
 nthreads    =  4
@@ -26,23 +27,27 @@ def read_in_file(filename, starting_block, num_blocks):
     global m_file
     
     m_file = mmap.mmap(-1, block_size * num_blocks)
-    with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
-        f.seek(starting_block * block_size)
-        for block in range(num_blocks):
-            m_file.write(f.read(block_size))
+    f = directio.open(filename, directio.O_RDONLY)
+    #with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
+    f.seek(starting_block * block_size)
+    for block in range(num_blocks):
+        directio.read(f, m_file)
+        #m_file.write(f.read(block_size))
 
 def run_test(filename, starting_block, num_blocks):
     global m_file
 
     m = mmap.mmap(-1, block_size)
-    with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
-        while True:
-            f.seek(starting_block * block_size)
-            for block in range(num_blocks):
-                m.seek(0)
-                m.write(f.read(block_size))
-                if not buf_eq(m, m_file, block * block_size):
-                    print "error"
+    f = directio.open(filename, directio.O_RDONLY)
+    #with os.fdopen(os.open(filename, os.O_RDONLY)) as f:
+    while True:
+        f.seek(starting_block * block_size)
+        for block in range(num_blocks):
+            m.seek(0)
+            directio.read(f, m)
+            #m.write(f.read(block_size))
+            if not buf_eq(m, m_file, block * block_size):
+                print "error"
 
 def main():
     if len(sys.argv) != 4:

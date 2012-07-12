@@ -7,9 +7,9 @@
 #define CACHE_SIZE	2000	/* maximum cache size in blocks */
 #define LJX_BLOCK_SIZE	(SECTOR_SIZE << LOG_BLOCK_SIZE)
 
-extern bool fetch_page(struct xen_vbd *, struct bio *);
+extern bool fetch_page(struct xen_blkif *, struct page *page, unsigned int sector_number, unsigned int nsec);
 
-extern void store_page(struct xen_vbd *, struct bio *);
+extern void store_page(struct xen_blkif *, struct page *, unsigned int sector_number);
 
 extern void invalidate(struct bio *);
 
