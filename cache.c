@@ -126,7 +126,7 @@ extern bool fetch_page(
 		return false;
 	}
 
-	spin_lock_irqsave(&lru_lock, flags);
+	//spin_lock_irqsave(&lru_lock, flags);
 	entry = find_entry(block, blkif);
 	if (entry && entry->valid) 
 		success = !copy_buf_to_block(page, entry->data, 0, nsec * SECTOR_SIZE);
@@ -134,7 +134,7 @@ extern bool fetch_page(
 		DPRINTK("HIT on block %lu", block);
 	else
 		DPRINTK("MISS on block %lu", block);
-	spin_unlock_irqrestore(&lru_lock, flags);
+	//spin_unlock_irqrestore(&lru_lock, flags);
 
 	return success;
 }
@@ -152,7 +152,7 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 		return;
 	}
 
-	spin_lock_irqsave(&lru_lock, flags);
+	//spin_lock_irqsave(&lru_lock, flags);
 
 	entry = find_entry(block, blkif);
 	if (!entry) {
@@ -182,7 +182,7 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 		num_cached_blocks--;
 	}
 
-	spin_unlock_irqrestore(&lru_lock, flags);
+	//spin_unlock_irqrestore(&lru_lock, flags);
 }
 
 /**
@@ -194,7 +194,9 @@ extern void invalidate(struct bio *bio) {
 	struct cache_entry *entry;
 	unsigned long flags;
 
-	spin_lock_irqsave(&lru_lock, flags);
+	DPRINTK("invalidate called -- cache size %u", num_cached_blocks);
+
+	//spin_lock_irqsave(&lru_lock, flags);
 
 	entry = find_entry(block, preq->blkif);
 	if (entry) {
@@ -202,5 +204,5 @@ extern void invalidate(struct bio *bio) {
 		entry->valid = false;
 	}
 
-	spin_unlock_irqrestore(&lru_lock, flags);
+	//spin_unlock_irqrestore(&lru_lock, flags);
 }

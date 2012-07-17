@@ -5,10 +5,10 @@ CFLAGS_cache.o := -DDEBUG
 CFLAGS_xenbus.o := -DDEBUG
 
 all:
-	make -C /lib/modules/3.3.6-xen-ljx-g4d4e3e5/build M=$(PWD) modules
+	make -C /lib/modules/3.3.6-xen-ljx-g56fb3e9/build M=$(PWD) modules
 
 clean:
-	make -C /lib/modules/3.3.6-xen-ljx-g4d4e3e5/build M=$(PWD) clean
+	make -C /lib/modules/3.3.6-xen-ljx-g56fb3e9/build M=$(PWD) clean
 
 tags: *.c *.h
 	ctags -R .

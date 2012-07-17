@@ -877,8 +877,8 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	list_for_each_safe(pos, n, &biolist) {
 		listed_bio = list_entry(pos, struct listed_bio, biolist);
 		bio = listed_bio->bio;
-		submit_bio(operation, bio);
 		invalidate(bio);
+		submit_bio(operation, bio);
 		trace_bio(bio, req);
 		kfree(listed_bio);
 	}
