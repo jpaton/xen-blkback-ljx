@@ -175,6 +175,7 @@ int test_cache_hits(int f, int size) {
 
   printf("test_cache_hits PASSED\n");
   free(buf);
+  lseek(f, 0, SEEK_SET);
   return ret;
 
 failed:
