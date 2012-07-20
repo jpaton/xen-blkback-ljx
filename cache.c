@@ -45,16 +45,23 @@ static struct cache_entry *find_entry(unsigned int block, struct xen_blkif *blki
 }
 
 /**
+ * Evicts entry from the cache.
+ */
+static void evict(struct cache_entry *entry) {
+	entry->valid = false;
+	list_del_init(&entry->lru);
+	radix_tree_delete(entry->radix_tree, entry->block);
+	kfree(entry);
+}
+
+/**
  * removes the entry from the LRU list and blkif's radix tree and kfree's the entry. 
  */
 static void evict_page(struct xen_blkif *blkif) {
 	struct cache_entry *lru_entry;
 
 	lru_entry = list_entry(lru_list.next, struct cache_entry, lru);
-	lru_entry->valid = false;
-	list_del_init(&lru_entry->lru);
-	radix_tree_delete(lru_entry->radix_tree, lru_entry->block);
-	kfree(lru_entry);
+	evict(lru_entry);
 }
 
 static void add_to_cache(struct cache_entry *entry) {
@@ -198,10 +205,12 @@ extern void invalidate(struct bio *bio) {
 
 	//spin_lock_irqsave(&lru_lock, flags);
 
-	entry = find_entry(block, preq->blkif);
-	if (entry) {
-		// TODO: evict instead
-		entry->valid = false;
+	for (block = bio->bi_sector >> LOG_BLOCK_SIZE;
+			block < bio_blocks(bio);
+			block++) {
+		entry = find_entry(block, preq->blkif);
+		if (entry) 
+			evict(entry);
 	}
 
 	//spin_unlock_irqrestore(&lru_lock, flags);

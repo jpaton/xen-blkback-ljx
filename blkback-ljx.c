@@ -857,20 +857,6 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	 */
 	atomic_set(&pending_req->pendcnt, nbio);
 
-//	if (
-//			nbio == 1 && 
-//			operation == READ && 
-//			bio_sectors(biolist[0]) == 8 &&
-//			fetch_page(&blkif->vbd, bio)
-//	) {
-//		bio->bi_rw |= operation;
-//		blk_partition_remap(bio);
-//		set_bit(BIO_UPTODATE, &bio->bi_flags);
-//		__end_block_io_op(bio->bi_private, 0);
-//		bio_put(bio);
-//		return 0;
-//	}
-
 	/* Get a reference count for the disk queue and start sending I/O */
 	blk_start_plug(&plug);
 

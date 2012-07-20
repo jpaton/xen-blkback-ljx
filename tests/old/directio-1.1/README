@@ -1,0 +1,31 @@
+
+   
+                                  directio module
+                                       
+   The _directio_ module is an interface to open(), read(), write() and 
+	 close on a direct I/O context (O_DIRECT flag) from the Python programming
+	 language.
+   
+   These system calls are Linux system calls to
+	   * open a file with the O_DIRECT flag, and close it.
+	   * read or write from the file ignores the buffer cache.
+   
+	 The O_DIRECT flag introduced in SGI IRIX, where it has alignment
+	 restrictions similar to those of Linux 2.4. FreeBSD 4.x introduced a
+	 flag of the same name, but without alignment restrictions. Support was
+	 added under Linux in kernel version 2.4.10. Older Linux kernels simply
+	 ignore this flag.
+	 Note that on a NFS file system, the flag O_DIRECT is ignored.
+   
+Version
+
+   The current version of the _directio_ module is 1.0.
+	 It should work on Linux 2.4.10 and higher. On older Linux kernels it would
+	 work as a simple open/read/write ignoring the O_DIRECT flag.
+   
+     _________________________________________________________________
+                                      
+   
+    Omar AitMous
+    
+   Last modified: Fri Aug 11 2006 10:46:45
