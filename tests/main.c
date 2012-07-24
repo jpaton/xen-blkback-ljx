@@ -123,13 +123,17 @@ int test_seq_read(int f, int size) {
   int ret = 0;
   uint32_t * buf;
 
-  die_on_true(get_buf((void **)&buf, BLOCK_SIZE), "get_buf");
+  if (get_buf((void **)&buf, BLOCK_SIZE) < 0)
+    return -1;
 
   for_each_block(block, size) {
-    die_on_true(read(f, buf, BLOCK_SIZE) < 0, "read");
+    if (read(f, buf, BLOCK_SIZE) < 0) {
+      printf("test_seq_read FAILED\n");
+      ret = -1;
+      goto exit;
+    }
     for_each_word(word, BLOCK_SIZE / WORD_SIZE) {
       if (buf[word] != block + 1) {
-        free(buf);
         printf("test_seq_read FAILED\n");
         ret = -1;
         goto exit;
@@ -154,7 +158,8 @@ int test_cache_hits(int f, int size) {
   int ret = 0;
   uint32_t * buf;
 
-  die_on_true(get_buf((void **)&buf, BLOCK_SIZE * 4), "get_buf");
+  if (get_buf((void **)&buf, BLOCK_SIZE * 4) < 0)
+    return -1;
 
   for (block_group = 0; block_group < size / 4; block_group++) {
     /* read once to get it into cache, then read again */
@@ -185,6 +190,73 @@ failed:
   return ret;
 }
 
+/**
+ * Tests that writes invalidate successfully but does multi-block writes
+ */
+int test_invalidate(int f, int size, const unsigned int num_blocks) {
+  unsigned int block, word, byte;
+  int ret = 0;
+  uint32_t x, y, z;
+  uint32_t * rbuf;
+  uint32_t * wrbuf;
+
+  die_on_true(get_buf((void **)&rbuf, BLOCK_SIZE * num_blocks), "get_buf");
+  die_on_true(get_buf((void **)&wrbuf, BLOCK_SIZE * num_blocks), "get_buf");
+
+  // fill a buffer with Fibonacci numbers
+  x = 0;
+  y = z = 1;
+  for (unsigned int i = 0; i < BLOCK_SIZE * num_blocks / sizeof(uint32_t); i++) {
+    wrbuf[i] = z;
+    z = x + y;
+    x = y;
+    y = z;
+  }
+
+  // first, read the first block and verify it
+  die_on_true(lseek(f, 0, SEEK_SET) < 0, "lseek");
+  die_on_true(read(f, rbuf, BLOCK_SIZE * num_blocks) < 0, "read");
+  for (unsigned int i = 0; i < BLOCK_SIZE * num_blocks / sizeof(uint32_t); i++) {
+    if (rbuf[i] != i / (BLOCK_SIZE / sizeof(uint32_t)) + 1) {
+      printf("test_invalidate (%u blocks) FAILED.\n", num_blocks);
+      printf("rbuf[%u] was %u\n", i, rbuf[i]);
+      ret = -1;
+      goto exit;
+    }
+  }
+
+  // next, write out the fibonacci sequence
+  die_on_true(lseek(f, 0, SEEK_SET) < 0, "lseek");
+  die_on_false(write(f, wrbuf, BLOCK_SIZE * num_blocks) == BLOCK_SIZE * num_blocks, "write");
+
+  // next, read them again and make sure they match up
+  die_on_true(lseek(f, 0, SEEK_SET) < 0, "lseek");
+  die_on_true(read(f, rbuf, BLOCK_SIZE * num_blocks) < 0, "read");
+  for (unsigned int i = 0; i < BLOCK_SIZE * num_blocks / sizeof(uint32_t); i++) {
+    if (rbuf[i] != wrbuf[i]) {
+      printf("test_invalidate (%u blocks) FAILED.\n", num_blocks);
+      printf("\tExpected:\t%u\n", wrbuf[i]);
+      printf("\tGot:\t%u\n", rbuf[i]);
+      ret = -1;
+      goto exit;
+    }
+  }
+
+  // finally, reverse all that we have done
+  for (unsigned int i = 0; i < BLOCK_SIZE * num_blocks / sizeof(uint32_t); i++) 
+    wrbuf[i] = i / (BLOCK_SIZE / sizeof(uint32_t)) + 1;
+  die_on_true(lseek(f, 0, SEEK_SET) < 0, "lseek");
+  die_on_false(write(f, wrbuf, BLOCK_SIZE * num_blocks) == BLOCK_SIZE * num_blocks, "write");
+  die_on_true(lseek(f, 0, SEEK_SET) < 0, "lseek");
+
+  printf("test_invalidate (%u blocks) PASSED\n", num_blocks);
+exit:
+  free(rbuf);
+  free(wrbuf);
+  lseek(f, 0, SEEK_SET);
+  return ret;
+}
+
 int main(int argc, char ** argv) {
   char * filename;
   int f;
@@ -200,12 +272,16 @@ int main(int argc, char ** argv) {
   strcat(filename, FILENAME);
   die_on_true(fill_file(filename, FILE_SIZE), "fill_file");
 
-  f = open(filename, O_RDONLY | O_DIRECT);
+  f = open(filename, O_RDWR | O_DIRECT);
   die_on_false(f, "open");
 
   if (test_seq_read(f, FILE_SIZE) < 0)
     goto exit;
   if (test_cache_hits(f, FILE_SIZE) < 0)
+    goto exit;
+  if (test_invalidate(f, FILE_SIZE, 1) < 0)
+    goto exit;
+  if (test_invalidate(f, FILE_SIZE, 7) < 0)
     goto exit;
   
 exit:

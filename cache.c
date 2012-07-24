@@ -200,17 +200,23 @@ extern void invalidate(struct bio *bio) {
 	struct pending_req *preq = bio->bi_private;
 	struct cache_entry *entry;
 	unsigned long flags;
+	unsigned long i;
 
 	DPRINTK("invalidate called -- cache size %u", num_cached_blocks);
 
 	//spin_lock_irqsave(&lru_lock, flags);
 
-	for (block = bio->bi_sector >> LOG_BLOCK_SIZE;
-			block < bio_blocks(bio);
-			block++) {
-		entry = find_entry(block, preq->blkif);
-		if (entry) 
+	for (i = block;
+			i < block + bio_blocks(bio);
+			i++) {
+		DPRINTK("invalidating block %lu till %lu", i, block + bio_blocks(bio));
+		entry = find_entry(i, preq->blkif);
+		if (entry) {
+			DPRINTK("block %lu found", block);
 			evict(entry);
+		} else {
+			DPRINTK("block %lu NOT found", block);
+		}
 	}
 
 	//spin_unlock_irqrestore(&lru_lock, flags);

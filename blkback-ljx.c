@@ -522,18 +522,20 @@ static void end_block_io_op(struct bio *bio, int error)
 	unsigned int i, sector_number;
 
 	if (!error) {
-		if ((preq->operation == BLKIF_OP_READ)
-			       && test_bit(BIO_UPTODATE, &bio->bi_flags)) {
-			sector_number = bio->bi_sector;
-			__bio_for_each_segment(bvl, bio, i, 0) {
-				store_page(preq->blkif, bvl->bv_page, sector_number);
-				sector_number += bvl->bv_len / SECTOR_SIZE;
-				if (bvl->bv_offset || bvl->bv_len != 4096)
-					DPRINTK("bvl seems wrong");
+		if (test_bit(BIO_UPTODATE, &bio->bi_flags)) {
+			if ((preq->operation == BLKIF_OP_READ)) {
+				sector_number = bio->bi_sector;
+				__bio_for_each_segment(bvl, bio, i, 0) {
+					store_page(preq->blkif, bvl->bv_page, sector_number);
+					sector_number += bvl->bv_len / SECTOR_SIZE;
+					if (bvl->bv_offset || bvl->bv_len != 4096)
+						DPRINTK("bvl seems wrong");
+				}
+			}
+			else if ((preq->operation == BLKIF_OP_WRITE)) {
+				invalidate(bio);
 			}
 		}
-	} else {
-		DPRINTK("error was true");
 	}
 	__end_block_io_op(bio->bi_private, error);
 	bio_put(bio);
@@ -863,7 +865,6 @@ static int dispatch_rw_block_io(struct xen_blkif *blkif,
 	list_for_each_safe(pos, n, &biolist) {
 		listed_bio = list_entry(pos, struct listed_bio, biolist);
 		bio = listed_bio->bio;
-		invalidate(bio);
 		submit_bio(operation, bio);
 		trace_bio(bio, req);
 		kfree(listed_bio);
