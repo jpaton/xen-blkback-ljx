@@ -73,18 +73,18 @@ module_param(log_stats, int, 0644);
 
 #define BLKBACK_INVALID_HANDLE (~0)
 
-struct xen_blkbk {
-	struct pending_req	*pending_reqs;
-	/* List of all 'pending_req' available */
-	struct list_head	pending_free;
-	/* And its spinlock. */
-	spinlock_t		pending_free_lock;
-	wait_queue_head_t	pending_free_wq;
-	/* The list of all pages that are available. */
-	struct page		**pending_pages;
-	/* And the grant handles that are available. */
-	grant_handle_t		*pending_grant_handles;
-};
+//struct xen_blkbk {
+	//struct pending_req	*pending_reqs;
+	///* List of all 'pending_req' available */
+	//struct list_head	pending_free;
+	///* And its spinlock. */
+	//spinlock_t		pending_free_lock;
+	//wait_queue_head_t	pending_free_wq;
+	///* The list of all pages that are available. */
+	//struct page		**pending_pages;
+	///* And the grant handles that are available. */
+	//grant_handle_t		*pending_grant_handles;
+//};
 
 static struct xen_blkbk *blkbk;
 
@@ -533,7 +533,7 @@ static void end_block_io_op(struct bio *bio, int error)
 				}
 			}
 			else if ((preq->operation == BLKIF_OP_WRITE)) {
-				invalidate(bio);
+				invalidate(bio, blkbk);
 			}
 		}
 	}

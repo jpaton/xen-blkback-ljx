@@ -165,6 +165,14 @@ struct xen_vbd {
 	bool				flush_support;
 	bool				discard_secure;
 	void 				*superblock;
+	struct radix_tree_root 		block_cache;
+	struct radix_tree_root		eviction_detector;
+	struct ljx_info {
+		unsigned int 		unrecognized_pages;
+		unsigned int 		same_pages;
+		unsigned int 		changed_pages;
+		struct kobject		kobj;
+	} ljx_info;
 };
 
 struct backend_info;
@@ -208,7 +216,6 @@ struct xen_blkif {
 
 	wait_queue_head_t	waiting_to_free;
 
-	struct radix_tree_root 	block_cache;
 };
 
 

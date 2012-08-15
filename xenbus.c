@@ -118,7 +118,6 @@ static struct xen_blkif *xen_blkif_alloc(domid_t domid)
 	atomic_set(&blkif->drain, 0);
 	blkif->st_print = jiffies;
 	init_waitqueue_head(&blkif->waiting_to_free);
-	INIT_RADIX_TREE(&blkif->block_cache, GFP_ATOMIC);
 
 	return blkif;
 }
@@ -239,6 +238,9 @@ VBD_SHOW(f_req,  "%d\n", be->blkif->st_f_req);
 VBD_SHOW(ds_req,  "%d\n", be->blkif->st_ds_req);
 VBD_SHOW(rd_sect, "%d\n", be->blkif->st_rd_sect);
 VBD_SHOW(wr_sect, "%d\n", be->blkif->st_wr_sect);
+VBD_SHOW(unrecognized_pages, "%d\n", be->blkif->vbd.ljx_info.unrecognized_pages);
+VBD_SHOW(changed_pages, "%d\n", be->blkif->vbd.ljx_info.changed_pages);
+VBD_SHOW(same_pages, "%d\n", be->blkif->vbd.ljx_info.same_pages);
 
 static struct attribute *xen_vbdstat_attrs[] = {
 	&dev_attr_oo_req.attr,
@@ -248,6 +250,9 @@ static struct attribute *xen_vbdstat_attrs[] = {
 	&dev_attr_ds_req.attr,
 	&dev_attr_rd_sect.attr,
 	&dev_attr_wr_sect.attr,
+	&dev_attr_unrecognized_pages.attr,
+	&dev_attr_changed_pages.attr,
+	&dev_attr_same_pages.attr,
 	NULL
 };
 
@@ -297,6 +302,7 @@ static void xen_vbd_free(struct xen_vbd *vbd)
 		blkdev_put(vbd->bdev, vbd->readonly ? FMODE_READ : FMODE_WRITE);
 	vbd->bdev = NULL;
 	vbd->superblock = NULL;
+	// TODO: somehow free up caches
 }
 
 static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
@@ -345,6 +351,11 @@ static int xen_vbd_create(struct xen_blkif *blkif, blkif_vdev_t handle,
 		vbd->discard_secure = true;
 
 	vbd->superblock = NULL;
+	INIT_RADIX_TREE(&vbd->block_cache, GFP_ATOMIC);
+	INIT_RADIX_TREE(&vbd->eviction_detector, GFP_ATOMIC);
+	vbd->ljx_info.unrecognized_pages = 0;
+	vbd->ljx_info.same_pages = 0;
+	vbd->ljx_info.changed_pages = 0;
 
 	DPRINTK("Successful creation of handle=%04x (dom=%u)\n",
 		handle, blkif->domid);

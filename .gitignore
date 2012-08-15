@@ -11,3 +11,4 @@ modules.order
 tags
 .tmp_versions/
 .xen-blkback-ljx.ko.cmd
+tests/test
