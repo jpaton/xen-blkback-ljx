@@ -9,7 +9,6 @@
 
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);
-//static DEFINE_SPINLOCK(lru_lock);
 
 /*
  * Little helpful macro to figure out the index and virtual address of the
