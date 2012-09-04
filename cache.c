@@ -164,9 +164,9 @@ static void check_for_eviction(struct xen_blkif *blkif, struct page *page) {
 	newchecksum = compute_checksum(page, &error);
 	if (error) return;
 	if (!checksum) {
-		blkif->vbd.ljx_info.unrecognized_pages++;
 		checksum = kmalloc(sizeof(unsigned long long), GFP_ATOMIC);
 		if (!checksum) return;
+		blkif->vbd.ljx_info.unrecognized_pages++;
 		radix_tree_insert(pages_seen, (unsigned long) page, checksum);
 	} else {
 		if (newchecksum != *checksum) 
