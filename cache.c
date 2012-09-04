@@ -189,14 +189,12 @@ extern bool fetch_page(
 ) {
 	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
-	//unsigned long flags;
 	bool success = false;
 
 	if (unlikely((sector_number & ((1 << LOG_BLOCK_SIZE) - 1)))) {
 		return false;
 	}
 
-	//spin_lock_irqsave(&lru_lock, flags);
 	check_for_eviction(blkif, page);
 	entry = find_entry(block, blkif);
 	if (entry && entry->valid) 
@@ -205,7 +203,6 @@ extern bool fetch_page(
 		DPRINTK("HIT on block %lu", block);
 	else
 		DPRINTK("MISS on block %lu", block);
-	//spin_unlock_irqrestore(&lru_lock, flags);
 
 	return success;
 }
@@ -217,13 +214,10 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
 	struct radix_tree_root *block_cache = &blkif->vbd.block_cache;
-	//unsigned long flags;
 
 	if (unlikely(sector_number & ((1 << LOG_BLOCK_SIZE) - 1))) {
 		return;
 	}
-
-	//spin_lock_irqsave(&lru_lock, flags);
 
 	entry = find_entry(block, blkif);
 	if (!entry) {
@@ -252,8 +246,6 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 		evict_page(blkif);
 		num_cached_blocks--;
 	}
-
-	//spin_unlock_irqrestore(&lru_lock, flags);
 }
 
 /**
@@ -264,12 +256,9 @@ extern void invalidate(struct bio *bio, struct xen_blkbk *blkbk) {
 	struct pending_req *preq = bio->bi_private;
 	struct cache_entry *entry;
 	struct page *page;
-	//unsigned long flags;
 	unsigned long i, page_nr;
 
 	DPRINTK("invalidate called -- cache size %u", num_cached_blocks);
-
-	//spin_lock_irqsave(&lru_lock, flags);
 
 	for (i = block;
 			i < block + bio_blocks(bio);
@@ -286,6 +275,4 @@ extern void invalidate(struct bio *bio, struct xen_blkbk *blkbk) {
 			radix_tree_delete(&preq->blkif->vbd.eviction_detector, (unsigned long) page);
 		}
 	}
-
-	//spin_unlock_irqrestore(&lru_lock, flags);
 }
