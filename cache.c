@@ -9,6 +9,7 @@
 
 static unsigned int num_cached_blocks = 0;
 static LIST_HEAD(lru_list);
+static LIST_HEAD(pages_lru);
 
 /*
  * Little helpful macro to figure out the index and virtual address of the
@@ -23,6 +24,12 @@ static inline int vaddr_pagenr(struct pending_req *req, int seg, struct xen_blkb
 }
 
 #define pending_page(req, seg, blkbk) pending_pages[vaddr_pagenr(req, seg, blkbk)]
+
+struct seen_page {
+	struct page 		*page;
+	unsigned long 		checksum;
+	bool 			valid;
+};
 
 struct cache_entry {
 	struct list_head	lru;
@@ -153,27 +160,32 @@ static unsigned long compute_checksum(struct page *page, int *error) {
  * check to see whether its contents are likely the same (by using the checksum). Report
  * the result.
  */
-static void check_for_eviction(struct xen_blkif *blkif, struct page *page) {
+static struct seen_page *check_for_eviction(struct xen_blkif *blkif, struct page *page) {
 	struct radix_tree_root *pages_seen = &blkif->vbd.eviction_detector;
-	unsigned long long *checksum, newchecksum;
+	struct seen_page *seen_page;
+	unsigned long *checksum, newchecksum;
 	int error;
 
-	checksum = radix_tree_lookup(pages_seen, (unsigned long) page);
+	seen_page = radix_tree_lookup(pages_seen, (unsigned long) page);
 	error = 0;
-	newchecksum = compute_checksum(page, &error);
-	if (error) return;
-	if (!checksum) {
-		checksum = kmalloc(sizeof(unsigned long long), GFP_ATOMIC);
-		if (!checksum) return;
+	if (!seen_page) {
 		blkif->vbd.ljx_info.unrecognized_pages++;
-		radix_tree_insert(pages_seen, (unsigned long) page, checksum);
-	} else {
-		if (newchecksum != *checksum) 
+		seen_page = kmalloc(sizeof(struct seen_page), GFP_ATOMIC);
+		seen_page->valid = false;
+		radix_tree_insert(pages_seen, (unsigned long) page, seen_page);
+	} else if (seen_page->valid) {
+		checksum = &seen_page->checksum;
+		newchecksum = compute_checksum(page, &error);
+		if (error) return NULL;
+		if (newchecksum != *checksum) {
 			blkif->vbd.ljx_info.changed_pages++;
-		else
+			seen_page->valid = false;
+		}
+		else {
 			blkif->vbd.ljx_info.same_pages++;
+		}
 	}
-	*checksum = newchecksum;
+	return seen_page;
 }
 
 /**
@@ -188,20 +200,23 @@ extern bool fetch_page(
 ) {
 	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
+	struct seen_page *seen_page;
 	bool success = false;
+	int error = 0;
 
 	if (unlikely((sector_number & ((1 << LOG_BLOCK_SIZE) - 1)))) {
 		return false;
 	}
 
-	check_for_eviction(blkif, page);
+	seen_page = check_for_eviction(blkif, page);
 	entry = find_entry(block, blkif);
 	if (entry && entry->valid) 
 		success = !copy_buf_to_block(page, entry->data, 0, nsec * SECTOR_SIZE);
-	if (success)
-		DPRINTK("HIT on block %lu", block);
-	else
-		DPRINTK("MISS on block %lu", block);
+	if (success) {
+		seen_page->checksum = compute_checksum(page, &error);
+		if (!error)
+			seen_page->valid = true;
+	}
 
 	return success;
 }
@@ -213,6 +228,8 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 	unsigned long block = sector_number >> LOG_BLOCK_SIZE;
 	struct cache_entry *entry;
 	struct radix_tree_root *block_cache = &blkif->vbd.block_cache;
+	struct seen_page *seen_page;
+	int error = 0;
 
 	if (unlikely(sector_number & ((1 << LOG_BLOCK_SIZE) - 1))) {
 		return;
@@ -222,21 +239,23 @@ extern void store_page(struct xen_blkif *blkif, struct page *page, unsigned int 
 	if (!entry) {
 		/* must create entry */
 		entry = new_cache_entry();
-		if (!entry)
+		if (unlikely(!entry))
 			return;
 		radix_tree_insert(block_cache, block, entry);
 		entry->radix_tree = block_cache;
 		entry->block = block;
-		num_cached_blocks++;
 	}
 	if (!load_data(entry, page)) { 
+		/* data successfully loaded */
 		entry->valid = true;
 		add_to_cache(entry);
-		DPRINTK("loaded block %lu", block);
+		seen_page = radix_tree_lookup(&blkif->vbd.eviction_detector, (unsigned long) page);
+		seen_page->checksum = compute_checksum(page, &error);
+		seen_page->valid = !error;
+		seen_page->page = page;
+		num_cached_blocks++;
 	}
 	else {
-		DPRINTK("failed to load block %lu", block);
-		num_cached_blocks--;
 		list_del_init(&entry->lru);
 		kfree(radix_tree_delete(&blkif->vbd.block_cache, block));
 	}
